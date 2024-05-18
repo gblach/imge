@@ -1,0 +1,23 @@
+name: Rust check
+
+on: [push, pull_request]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        rust-version: ["stable", "beta", "nightly"]
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ matrix.rust-version }}
+    - name: Check
+      run: cargo check --verbose

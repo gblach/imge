@@ -1,0 +1,16 @@
+[package]
+name = "imge"
+version = "0.1.0"
+edition = "2021"
+description = "Write disk images to physical drive."
+readme = "README.md"
+repository = "https://github.com/gblach/imge"
+license = "MPL-2.0"
+keywords = ["cli", "filesystem", "linux", "tool", "tui"]
+categories = ["command-line-utilities", "filesystem", "hardware-support"]
+
+[dependencies]
+argh = "0.1"
+crossterm = "0.27"
+drives = "0.6"
+ratatui = "0.26"
