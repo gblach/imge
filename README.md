@@ -27,11 +27,11 @@ Options:
 
 `Imge` is a TUI tool for writing disk images to removable (by default) or non-removable (by `-a` option) drives. It's intended to be an easier to use and less error-prone than `dd`, since choosing the wrong disk may have a big impact on the data on your hard drive.
 
-![main](screenshots/1-main.avif)
-![keybindings](screenshots/2-keybindings.avif)
-![warning](screenshots/3-warning.avif)
-![progress](screenshots/4-progress.avif)
-![victory](screenshots/5-victory.avif)
+![main](https://raw.githubusercontent.com/gblach/imge/5350e5d/screenshots/1-main.avif)
+![keybindings](https://raw.githubusercontent.com/gblach/imge/5350e5d/screenshots/2-keybindings.avif)
+![warning](https://raw.githubusercontent.com/gblach/imge/5350e5d/screenshots/3-warning.avif)
+![progress](https://raw.githubusercontent.com/gblach/imge/5350e5d/screenshots/4-progress.avif)
+![victory](https://raw.githubusercontent.com/gblach/imge/5350e5d/screenshots/5-victory.avif)
 
 ## TODO
 
