@@ -5,7 +5,13 @@ Write disk images to physical drive.
 ## Install
 
 ```
+# Install from source
 $ cargo install imge
+
+# Install from binary
+$ cargo binstall imge
+
+# If ~/.cargo/bin is not in your PATH
 $ export PATH=$PATH:~/.cargo/bin
 ```
 
