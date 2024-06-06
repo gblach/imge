@@ -11,7 +11,7 @@ use mainloop::Mainloop;
 use std::fs::File;
 use std::io;
 
-#[derive(FromArgs)]
+#[derive(Clone, Default, FromArgs)]
 /// Write disk images to physical drive.
 struct Args {
 	/// show all drives

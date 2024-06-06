@@ -25,9 +25,8 @@ enum Modal {
 
 #[derive(Default)]
 pub struct Mainloop {
-	all_drives: bool,
+	args: Args,
 	ui_accent: Style,
-	image: String,
 	image_basename: String,
 	drives: Vec<imge::Drive>,
 	selected_row: usize,
@@ -44,13 +43,12 @@ impl Mainloop {
 			.unwrap().to_string_lossy().to_string();
 
 		Self {
-			all_drives: args.all_drives,
+			args: args.clone(),
 			ui_accent: if args.magenta {
 				Style::new().light_magenta()
 			} else {
 				Style::new().light_yellow()
 			},
-			image: args.image,
 			image_basename,
 			..Default::default()
 		}
@@ -338,7 +336,7 @@ impl Mainloop {
 		}
 
 		else if self.modal == Modal::Warning && key.code == KeyCode::Enter {
-			let src = self.image.clone();
+			let src = self.args.image.clone();
 			let dest = self.selected_name.clone();
 			let progress = Arc::new(Mutex::new(imge::Progress::default()));
 			let error = self.error.clone();
@@ -356,10 +354,10 @@ impl Mainloop {
 		else if self.modal == Modal::None {
 			match key.code {
 				KeyCode::Char('a') => {
-					self.all_drives = !self.all_drives;
+					self.args.all_drives = !self.args.all_drives;
 					self.update_drives(true);
 				},
-				KeyCode::Char('r') => {		
+				KeyCode::Char('r') => {
 					self.update_drives(true);
 				},
 				KeyCode::Up => {
@@ -395,7 +393,7 @@ impl Mainloop {
 
 	fn update_drives(&mut self, refresh: bool) {
 		self.selected_name = if refresh {
-			self.drives = imge::list(self.all_drives);
+			self.drives = imge::list(self.args.all_drives);
 			self.selected_row = 0;
 
 			for i in 0..self.drives.len() {
