@@ -8,15 +8,19 @@ mod mainloop;
 use argh::FromArgs;
 use crossterm::terminal;
 use mainloop::Mainloop;
-use std::fs::File;
+use std::fs::{File, remove_file};
 use std::io;
 
 #[derive(Clone, Default, FromArgs)]
-/// Write disk images to physical drive.
+/// Write disk images to physical drive or vice versa.
 struct Args {
 	/// show all drives
 	#[argh(switch, short='a')]
 	all_drives: bool,
+
+	/// copy drive to image (instead of image to drive)
+	#[argh(switch, short='f')]
+	from_drive: bool,
 
 	/// magenta mode
 	#[argh(switch, short='m')]
@@ -41,7 +45,14 @@ fn terminal_raw_mode(raw_mode: bool) -> io::Result<()> {
 
 fn main() -> io::Result<()> {
 	let args: Args = argh::from_env();
-	File::open(&args.image)?;
+
+	if args.from_drive {
+		let write_test = format!(".{}.imge", args.image);
+		File::create(&write_test)?;
+		remove_file(&write_test)?;
+	} else {
+		File::open(&args.image)?;
+	}
 
 	terminal_raw_mode(true)?;
 	Mainloop::new(args).run()?;

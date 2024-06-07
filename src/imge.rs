@@ -3,17 +3,18 @@
 //  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use std::fs::File;
+use std::io;
 use std::io::prelude::*;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 pub struct Drive {
 	pub name: String,
-	pub is_removable: bool,
-	pub is_mounted: bool,
 	pub model: String,
 	pub serial: String,
-	pub size: String,
+	pub is_removable: bool,
+	pub is_mounted: bool,
+	pub size: u64,
 }
 
 pub fn list(all_drives: bool) -> Vec<Drive> {
@@ -36,7 +37,7 @@ pub fn list(all_drives: bool) -> Vec<Drive> {
 				serial: device.serial.unwrap_or_default(),
 				is_removable: device.is_removable,
 				is_mounted,
-				size: device.size.as_human_readable_string(),
+				size: device.size.get_raw_size() * 512,
 			});
 		}
 	}
@@ -66,15 +67,31 @@ impl Progress {
 	}
 }
 
-pub fn copy(src: &str, dest: &str, progress_mutex: &Arc<Mutex<Progress>>) -> std::io::Result<()> {
+pub struct Path {
+	pub path: String,
+	pub size: Option<u64>,
+}
+
+pub fn copy(src: &Path, dest: &Path, progress_mutex: &Arc<Mutex<Progress>>) -> io::Result<()> {
+	let mut srcfile = File::open(&src.path)?;
+
+	let ssize = match src.size {
+		Some(size) => size,
+		None => srcfile.metadata()?.len(),
+	};
+
+	if let Some(dsize) = dest.size {
+		if ssize > dsize {
+			return Err(io::Error::other("File too large (os error 27)"));
+		}
+	}
+
+	let mut destfile = File::create(&dest.path)?;
+	let mut buffer = [0; 1024 * 1024];
 	let timer = Instant::now();
 
-	let mut srcfile = File::open(src)?;
-	let mut destfile = File::create(dest)?;
-	let mut buffer = [0; 1024 * 1024];
-
 	let mut progress = progress_mutex.lock().unwrap();
-	progress.size = srcfile.metadata()?.len();
+	progress.size = ssize;
 	drop(progress);
 
 	loop {

@@ -31,6 +31,7 @@ pub struct Mainloop {
 	drives: Vec<imge::Drive>,
 	selected_row: usize,
 	selected_name: String,
+	selected_size: u64,
 	modal: Modal,
 	progress: Option<Arc<Mutex<imge::Progress>>>,
 	error: Arc<Mutex<Option<io::Error>>>,
@@ -103,15 +104,21 @@ impl Mainloop {
 			.border_style(Style::new().dark_gray())
 			.border_type(BorderType::Double);
 
-		let lines = vec![
-			Line::from(vec![
+		let header = match self.args.from_drive {
+			false => Line::from(vec![
 				"Select the drive you wanna copy ".into(),
 				Span::styled(&self.image_basename, self.ui_accent),
 				" to.".into(),
 			]),
-		];
+			true => Line::from(vec![
+				"Select the drive you wanna copy to ".into(),
+				Span::styled(&self.image_basename, self.ui_accent),
+				".".into(),
+			]),
+		};
 
-		let p = Paragraph::new(lines).wrap(Wrap { trim: true }).centered().block(block);
+		let p = Paragraph::new(vec![header])
+			.wrap(Wrap { trim: true }).centered().block(block);
 		frame.render_widget(p, frame.size());
 
 		let info = Line::from(vec![
@@ -150,7 +157,8 @@ impl Mainloop {
 				};
 				row.push(Cell::from(is_mounted));
 			}
-			row.push(Cell::from(Text::from(drive.size.clone()).right_aligned()));
+			let size = imge::humanize(drive.size);
+			row.push(Cell::from(Text::from(size).right_aligned()));
 
 			rows.push(Row::new(row));
 		}
@@ -232,28 +240,42 @@ impl Mainloop {
 	}
 
 	fn render_warning(&self, frame: &mut Frame) {
-		let lines = vec![
-			Line::from(vec![]),
-			Line::from(vec![
-				"Are you really going to write ".into(),
-				Span::styled(&self.image_basename, self.ui_accent),
-				" to\u{00a0}".into(),
-				Span::styled(&self.selected_name, self.ui_accent),
-				"?".into()
-			]),
-			Line::from(vec![
+		let (src, dest) = match self.args.from_drive {
+			false => (&self.image_basename, &self.selected_name),
+			true => (&self.selected_name, &self.image_basename),
+		};
+
+		let mut lines = Vec::with_capacity(6);
+		lines.push(Line::from(vec![]));
+
+		if self.args.from_drive {
+			lines.push(Line::from(vec![]));
+		}
+
+		lines.push(Line::from(vec![
+			"Are you really going to copy ".into(),
+			Span::styled(src, self.ui_accent),
+			" to\u{00a0}".into(),
+			Span::styled(dest, self.ui_accent),
+			"?".into()
+		]));
+
+		if !self.args.from_drive {
+			lines.push(Line::from(vec![
 				"This is something that cannot be undone.".into(),
-			]),
-			Line::from(vec![]),
-			Line::from(vec![]),
-			Line::from(vec![
-				Span::styled("<esc> ", self.ui_accent),
-				"Cancel".into(),
-				"          ".into(),
-				Span::styled("<enter> ", self.ui_accent),
-				"Continue".into(),
-			]),
-		];
+			]));
+		}
+
+		lines.push(Line::from(vec![]));
+		lines.push(Line::from(vec![]));
+
+		lines.push(Line::from(vec![
+			Span::styled("<esc> ", self.ui_accent),
+			"Cancel".into(),
+			"          ".into(),
+			Span::styled("<enter> ", self.ui_accent),
+			"Continue".into(),
+		]));
 
 		self.render_modal(frame, " Warning ", lines);
 	}
@@ -287,7 +309,7 @@ impl Mainloop {
 				"Copied ".into(),
 				Span::styled(imge::humanize(progress.copied), self.ui_accent),
 				" in ".into(),
-				Span::styled(format!("{}", progress.secs), self.ui_accent),
+				Span::styled(progress.secs.to_string(), self.ui_accent),
 				" seconds.".into(),
 			]),
 			Line::from(vec![]),
@@ -336,13 +358,23 @@ impl Mainloop {
 		}
 
 		else if self.modal == Modal::Warning && key.code == KeyCode::Enter {
-			let src = self.args.image.clone();
-			let dest = self.selected_name.clone();
+			let image_path = imge::Path {
+				path: self.args.image.clone(),
+				size: None,
+			};
+			let drive_path = imge::Path {
+				path: self.selected_name.clone(),
+				size: Some(self.selected_size),
+			};
+			let (src, dest) = match self.args.from_drive {
+				false => (image_path, drive_path),
+				true => (drive_path, image_path),
+			};
+
 			let progress = Arc::new(Mutex::new(imge::Progress::default()));
 			let error = self.error.clone();
-
-			self.modal = Modal::Progress;
 			self.progress = Some(progress.clone());
+			self.modal = Modal::Progress;
 
 			thread::spawn(move || {
 				if let Err(copy_err) = imge::copy(&src, &dest, &progress) {
@@ -392,7 +424,7 @@ impl Mainloop {
 	}
 
 	fn update_drives(&mut self, refresh: bool) {
-		self.selected_name = if refresh {
+		if refresh {
 			self.drives = imge::list(self.args.all_drives);
 			self.selected_row = 0;
 
@@ -407,13 +439,14 @@ impl Mainloop {
 				self.selected_row = self.drives.len() - 1;
 			}
 
-			if !self.drives.is_empty() {
-				self.drives[self.selected_row].name.clone()
-			} else {
-				"".to_string()
+			if self.drives.is_empty() {
+				self.selected_name = "".to_string();
+				self.selected_size = 0;
+				return;
 			}
-		} else {
-			self.drives[self.selected_row].name.clone()
-		};
+		}
+
+		self.selected_name.clone_from(&self.drives[self.selected_row].name);
+		self.selected_size = self.drives[self.selected_row].size;
 	}
 }
