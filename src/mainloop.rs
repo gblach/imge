@@ -2,7 +2,7 @@
 //  License, v. 2.0. If a copy of the MPL was not distributed with this
 //  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui::widgets::{*, block::*};
 use std::io;
@@ -351,7 +351,11 @@ impl Mainloop {
 	}
 
 	fn handle_events(&mut self, key: KeyEvent) {
-		if key.code == KeyCode::Char('i') {
+		if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
+			self.exit = true;
+		}
+
+		else if key.code == KeyCode::Char('i') {
 			match self.modal {
 				Modal::None => self.modal = Modal::Keybindings,
 				Modal::Keybindings => self.modal = Modal::None,
@@ -416,6 +420,10 @@ impl Mainloop {
 				},
 				_ => {}
 			}
+
+			println!("{:?}, {:?}, {:?}, {:?}",
+				key.code, key.modifiers,
+				key.kind, key.state);
 		}
 
 		else if key.code == KeyCode::Esc {
