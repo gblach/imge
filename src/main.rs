@@ -10,6 +10,7 @@ use crossterm::terminal;
 use mainloop::Mainloop;
 use std::fs::{File, remove_file};
 use std::io;
+use std::path::Path;
 
 #[derive(Clone, Default, FromArgs)]
 /// Write disk images to physical drive or vice versa.
@@ -43,7 +44,14 @@ fn main() -> io::Result<()> {
 	let args: Args = argh::from_env();
 
 	if args.from_drive {
-		let write_test = format!(".{}.imge", args.image);
+		let path = Path::new(&args.image);
+		let dirname = path.parent().unwrap().to_string_lossy();
+		let filename = path.file_name().unwrap().to_string_lossy();
+		let write_test = if dirname.is_empty() {
+			format!(".{}.imge", filename)
+		} else {
+			format!("{}/.{}.imge", dirname, filename)
+		};
 		File::create(&write_test)?;
 		remove_file(&write_test)?;
 	} else {
