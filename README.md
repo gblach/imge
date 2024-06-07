@@ -1,6 +1,6 @@
 # imge
 
-Write disk images to physical drive.
+Write disk images to physical drive or vice versa.
 
 ## Install
 
@@ -18,21 +18,22 @@ $ export PATH=$PATH:~/.cargo/bin
 ## Synopsis
 
 ```
-imge <image> [-a] [-m]
+imge <image> [-a] [-f]
 
 Positional Arguments:
   image             path to image
 
 Options:
   -a, --all-drives  show all drives
-  -m, --magenta     magenta mode
+  -f, --from-drive  copy drive to image (instead of image to drive)
   --help            display usage information
 ```
 
 ## Description
 
 `Imge` is a TUI tool for writing disk images to removable (by default) or non-removable
-(by `-a` option) drives. It's intended to be an easier to use and less error-prone than `dd`,
+(by `-a` option) drives. It also has an option to copy the drive to the disk image.
+It's intended to be an easier to use and less error-prone than `dd`,
 since choosing the wrong disk may have a big impact on the data on your hard drive.
 
 ![main](https://raw.githubusercontent.com/gblach/imge/5350e5d/screenshots/1-main.avif)
@@ -43,7 +44,6 @@ since choosing the wrong disk may have a big impact on the data on your hard dri
 
 ## TODO
 
-- Add ability to copy drive to file too.
 - Compress/decompress image on the fly.
 - Verify if data was copied correctly.
 - Verify checksum before making copy.

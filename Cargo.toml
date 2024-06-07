@@ -2,7 +2,7 @@
 name = "imge"
 version = "0.1.0"
 edition = "2021"
-description = "Write disk images to physical drive."
+description = "Write disk images to physical drive or vice versa."
 readme = "README.md"
 repository = "https://github.com/gblach/imge"
 license = "MPL-2.0"
