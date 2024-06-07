@@ -45,10 +45,10 @@ impl Mainloop {
 
 		Self {
 			args: args.clone(),
-			ui_accent: if args.magenta {
-				Style::new().light_magenta()
-			} else {
+			ui_accent: if args.from_drive {
 				Style::new().light_yellow()
+			} else {
+				Style::new().light_magenta()
 			},
 			image_basename,
 			..Default::default()

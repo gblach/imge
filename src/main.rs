@@ -22,10 +22,6 @@ struct Args {
 	#[argh(switch, short='f')]
 	from_drive: bool,
 
-	/// magenta mode
-	#[argh(switch, short='m')]
-	magenta: bool,
-
 	/// path to image
 	#[argh(positional)]
 	image: String,
