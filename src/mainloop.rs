@@ -121,13 +121,15 @@ impl Mainloop {
 			.wrap(Wrap { trim: true }).centered().block(block);
 		frame.render_widget(p, frame.size());
 
-		let info = Line::from(vec![
-			"Press ".into(),
-			Span::styled("<i>", self.ui_accent),
-			" to display keybindings.".into()
-		]);
-		let area = Rect::new(0, frame.size().height-2, frame.size().width, 1);
-		frame.render_widget(info, area);
+		if self.modal == Modal::None || self.modal == Modal::Keybindings {
+			let info = Line::from(vec![
+				"Press ".into(),
+				Span::styled("<i>", self.ui_accent),
+				" to display keybindings.".into()
+			]);
+			let area = Rect::new(0, frame.size().height-2, frame.size().width, 1);
+			frame.render_widget(info, area);
+		}
 	}
 
 	fn render_drives(&self, frame: &mut Frame) {
