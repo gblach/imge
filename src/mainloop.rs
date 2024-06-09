@@ -420,10 +420,6 @@ impl Mainloop {
 				},
 				_ => {}
 			}
-
-			println!("{:?}, {:?}, {:?}, {:?}",
-				key.code, key.modifiers,
-				key.kind, key.state);
 		}
 
 		else if key.code == KeyCode::Esc {
