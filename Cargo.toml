@@ -14,3 +14,7 @@ argh = "0.1"
 crossterm = "0.27"
 drives = "0.6"
 ratatui = "0.26"
+
+[profile.release]
+strip = "symbols"
+lto = "thin"
