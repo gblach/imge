@@ -3,6 +3,8 @@
 //  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use derivative::Derivative;
+use mime::Mime;
 use ratatui::prelude::*;
 use ratatui::widgets::{*, block::*};
 use std::io;
@@ -23,11 +25,14 @@ enum Modal {
 	Error,
 }
 
-#[derive(Default)]
+#[derive(Derivative)]
+#[derivative(Default)]
 pub struct Mainloop {
 	args: Args,
 	ui_accent: Style,
 	image_basename: String,
+	#[derivative(Default(value="mime::APPLICATION_OCTET_STREAM"))]
+	image_mime_type: Mime,
 	drives: Vec<imge::Drive>,
 	selected_row: usize,
 	selected_name: String,
@@ -40,17 +45,28 @@ pub struct Mainloop {
 
 impl Mainloop {
 	pub fn new(args: Args) -> Self {
-		let image_basename = Path::new(&args.image).file_name()
-			.unwrap().to_string_lossy().to_string();
+		let ui_accent = match args.from_drive {
+			false => Style::new().light_magenta(),
+			true => Style::new().light_yellow(),
+		};
+
+		let image_path = Path::new(&args.image);
+		let image_basename = image_path.file_name().unwrap().to_string_lossy().to_string();
+
+		let image_mime_type = match args.from_drive {
+			false => tree_magic_mini::from_filepath(image_path)
+				.unwrap_or(mime::APPLICATION_OCTET_STREAM.as_ref())
+				.parse().unwrap(),
+			true => mime_guess::from_ext(
+				&image_path.extension().unwrap_or_default().to_string_lossy())
+				.first_or_octet_stream(),
+		};
 
 		Self {
 			args: args.clone(),
-			ui_accent: if args.from_drive {
-				Style::new().light_yellow()
-			} else {
-				Style::new().light_magenta()
-			},
+			ui_accent,
 			image_basename,
+			image_mime_type,
 			..Default::default()
 		}
 	}

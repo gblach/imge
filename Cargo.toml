@@ -12,8 +12,12 @@ categories = ["command-line-utilities", "filesystem", "hardware-support"]
 [dependencies]
 argh = "0.1"
 crossterm = "0.27"
+derivative = "2.2"
 drives = "0.6"
+mime = "0.3"
+mime_guess = "2.0"
 ratatui = "0.26"
+tree_magic_mini = "3.1"
 
 [profile.release]
 strip = "symbols"
