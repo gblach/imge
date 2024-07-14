@@ -42,7 +42,7 @@ jobs:
         run: cargo install clippy-sarif sarif-fmt
 
       - name: Install libarchive
-        run: apt-get -y install libarchive-dev
+        run: sudo apt-get -y install libarchive-dev
 
       - name: Run rust-clippy
         run:

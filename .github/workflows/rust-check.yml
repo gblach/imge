@@ -20,6 +20,6 @@ jobs:
       with:
         toolchain: ${{ matrix.rust-version }}
     - name: Install libarchive
-      run: apt-get -y install libarchive-dev
+      run: sudo apt-get -y install libarchive-dev
     - name: Check
       run: cargo check --verbose
