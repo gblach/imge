@@ -8,6 +8,7 @@ mod mainloop;
 use argh::FromArgs;
 use crossterm::terminal;
 use mainloop::Mainloop;
+use std::ffi::OsString;
 use std::fs::{File, remove_file};
 use std::io;
 use std::path::Path;
@@ -25,7 +26,7 @@ struct Args {
 
 	/// path to image
 	#[argh(positional)]
-	image: String,
+	image: OsString,
 }
 
 fn terminal_raw_mode(raw_mode: bool) -> io::Result<()> {

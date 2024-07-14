@@ -2,14 +2,17 @@
 //  License, v. 2.0. If a copy of the MPL was not distributed with this
 //  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use libarchive3_sys::ffi::*;
+use std::ffi::{c_void, CString, OsString};
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
+use std::os::unix::ffi::OsStrExt;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 pub struct Drive {
-	pub name: String,
+	pub name: OsString,
 	pub model: String,
 	pub serial: String,
 	pub is_removable: bool,
@@ -32,7 +35,7 @@ pub fn list(all_drives: bool) -> Vec<Drive> {
 
 		if device.is_removable || all_drives {
 			drives.push(Drive {
-				name: format!("/dev/{}", device.name),
+				name: OsString::from(format!("/dev/{}", device.name)),
 				model: device.model.unwrap_or_default(),
 				serial: device.serial.unwrap_or_default(),
 				is_removable: device.is_removable,
@@ -51,6 +54,7 @@ pub struct Progress {
 	pub copied: u64,
 	pub size: u64,
 	pub secs: u64,
+	pub finished: bool,
 }
 
 impl Progress {
@@ -61,53 +65,82 @@ impl Progress {
 			self.copied as f64 / self.size as f64
 		}
 	}
-
-	pub fn finished(&self) -> bool {
-		self.copied == self.size && self.size > 0
-	}
 }
 
 pub struct Path {
-	pub path: String,
+	pub path: OsString,
 	pub size: Option<u64>,
 }
 
-pub fn copy(src: &Path, dest: &Path, progress_mutex: &Arc<Mutex<Progress>>) -> io::Result<()> {
-	let mut srcfile = File::open(&src.path)?;
+pub fn copy(src: &Path, dest: &Path, from_drive: bool, progress_mutex: &Arc<Mutex<Progress>>)
+	-> io::Result<()> {
 
-	let ssize = match src.size {
-		Some(size) => size,
-		None => srcfile.metadata()?.len(),
-	};
-
-	if let Some(dsize) = dest.size {
+	if let (Some(ssize), Some(dsize)) = (src.size, dest.size) {
 		if ssize > dsize {
 			return Err(io::Error::other("File too large (os error 27)"));
 		}
 	}
 
+	let mut srcfile = File::open(&src.path)?;
+
+	let a = unsafe {
+		let a = archive_read_new();
+		archive_read_support_filter_all(a);
+		archive_read_support_format_raw(a);
+		a
+	};
+
+	if !from_drive {
+		unsafe {
+			let srcfilename = CString::new(src.path.as_bytes()).unwrap();
+			let rc = archive_read_open_filename(a, srcfilename.as_ptr(), 1024 * 1024);
+			if rc != ARCHIVE_OK {
+				return Err(io::Error::other("Cannot open file for reading"));
+			}
+
+			let ae = archive_entry_new2(a);
+			let ae_ptr = ae as *mut *mut Struct_archive_entry;
+			let rc = archive_read_next_header(a, ae_ptr);
+			if rc != ARCHIVE_OK {
+				return Err(io::Error::other("Cannot read file header"));
+			}
+		};
+	}
+
 	let mut destfile = File::create(&dest.path)?;
 	let mut buffer = [0; 1024 * 1024];
+	let buffer_ptr = buffer.as_mut_ptr() as *mut c_void;
 	let timer = Instant::now();
 
 	let mut progress = progress_mutex.lock().unwrap();
-	progress.size = ssize;
+	progress.size = src.size.unwrap_or_default();
 	drop(progress);
 
 	loop {
-		let len = srcfile.read(&mut buffer)?;
-		if len == 0 {
+		let len = match from_drive {
+			false => unsafe {
+				archive_read_data(a, buffer_ptr, 1024 * 1024)
+			},
+			true => srcfile.read(&mut buffer)? as isize,
+		};
+		if len <= 0 {
 			break;
 		}
-		destfile.write_all(&buffer[..len])?;
+
+		destfile.write_all(&buffer[..(len as usize)])?;
 		destfile.sync_data()?;
 
 		let mut progress = progress_mutex.lock().unwrap();
 		progress.copied += len as u64;
 	}
 
+	unsafe {
+		archive_read_free(a);
+	}
+
 	let mut progress = progress_mutex.lock().unwrap();
 	progress.secs = timer.elapsed().as_secs();
+	progress.finished = true;
 
 	Ok(())
 }

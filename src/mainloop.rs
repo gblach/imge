@@ -7,6 +7,7 @@ use derivative::Derivative;
 use mime::Mime;
 use ratatui::prelude::*;
 use ratatui::widgets::{*, block::*};
+use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -35,7 +36,7 @@ pub struct Mainloop {
 	image_mime_type: Mime,
 	drives: Vec<imge::Drive>,
 	selected_row: usize,
-	selected_name: String,
+	selected_name: OsString,
 	selected_size: u64,
 	modal: Modal,
 	progress: Option<Arc<Mutex<imge::Progress>>>,
@@ -82,7 +83,7 @@ impl Mainloop {
 			}
 
 			else if let Some(progress) = &self.progress {
-				if progress.lock().unwrap().finished() {
+				if progress.lock().unwrap().finished {
 					self.modal = Modal::Victory;
 				}
 			}
@@ -154,7 +155,7 @@ impl Mainloop {
 		for drive in &self.drives {
 			let mut row = Vec::with_capacity(6);
 
-			row.push(Cell::from(drive.name.clone()));
+			row.push(Cell::from(drive.name.to_string_lossy()));
 			row.push(Cell::from(drive.model.clone()));
 			if frame.size().width > 160 {
 				row.push(Cell::from(drive.serial.clone()));
@@ -259,8 +260,14 @@ impl Mainloop {
 
 	fn render_warning(&self, frame: &mut Frame) {
 		let (src, dest) = match self.args.from_drive {
-			false => (&self.image_basename, &self.selected_name),
-			true => (&self.selected_name, &self.image_basename),
+			false => (
+				&self.image_basename,
+				&self.selected_name.to_string_lossy().to_string(),
+			),
+			true => (
+				&self.selected_name.to_string_lossy().to_string(),
+				&self.image_basename,
+			),
 		};
 
 		let mut lines = Vec::with_capacity(6);
@@ -382,25 +389,36 @@ impl Mainloop {
 		else if self.modal == Modal::Warning && key.code == KeyCode::Enter {
 			let image_path = imge::Path {
 				path: self.args.image.clone(),
-				size: None,
+				size: if self.image_mime_type == mime::APPLICATION_OCTET_STREAM {
+					match std::fs::metadata(&self.args.image) {
+						Ok(metadata) => Some(metadata.len()),
+						Err(_) => None,
+					}
+				} else {
+					None
+				},
 			};
+
 			let drive_path = imge::Path {
 				path: self.selected_name.clone(),
 				size: Some(self.selected_size),
 			};
+
 			let (src, dest) = match self.args.from_drive {
 				false => (image_path, drive_path),
 				true => (drive_path, image_path),
 			};
 
+			let from_drive = self.args.from_drive;
 			let progress = Arc::new(Mutex::new(imge::Progress::default()));
 			let error = self.error.clone();
+
 			self.progress = Some(progress.clone());
 			self.modal = Modal::Progress;
 
 			thread::spawn(move || {
-				if let Err(copy_err) = imge::copy(&src, &dest, &progress) {
-					*error.lock().unwrap() = Some(copy_err);
+				if let Err(err) = imge::copy(&src, &dest, from_drive, &progress) {
+					*error.lock().unwrap() = Some(err);
 				}
 			});
 		}
@@ -462,7 +480,7 @@ impl Mainloop {
 			}
 
 			if self.drives.is_empty() {
-				self.selected_name = "".to_string();
+				self.selected_name = OsString::from("");
 				self.selected_size = 0;
 				return;
 			}
