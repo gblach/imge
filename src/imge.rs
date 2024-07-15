@@ -84,10 +84,25 @@ pub fn copy(src: &Path, dest: &Path, from_drive: bool, progress_mutex: &Arc<Mute
 	let mut srcfile = File::open(&src.path)?;
 
 	let a = unsafe {
-		let a = archive_read_new();
-		archive_read_support_filter_all(a);
-		archive_read_support_format_raw(a);
-		a
+		match from_drive {
+			false => {
+				let a = archive_read_new();
+				archive_read_support_filter_all(a);
+				archive_read_support_format_raw(a);
+				a
+			},
+			true => {
+				let a = archive_write_new();
+				// none  -> 0
+				// gzip  -> 1
+				// bzip2 -> 2
+				// xz    -> 6
+				// zstd  -> 14
+				archive_write_add_filter(a, 1);
+				archive_write_set_format(a, 0x90000); // RAW
+				a
+			},
+		}
 	};
 
 	if !from_drive {

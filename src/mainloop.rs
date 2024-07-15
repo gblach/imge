@@ -5,6 +5,7 @@
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use derivative::Derivative;
 use mime::Mime;
+use num_format::{SystemLocale, ToFormattedString};
 use ratatui::prelude::*;
 use ratatui::widgets::{*, block::*};
 use std::ffi::OsString;
@@ -307,16 +308,31 @@ impl Mainloop {
 
 	fn render_progress(&self, frame: &mut Frame) {
 		let progress = self.progress.as_ref().unwrap().lock().unwrap();
-
-		let gauge = LineGauge::default()
-			.style(self.ui_accent)
-			.gauge_style(self.ui_accent.on_dark_gray())
-			.line_set(symbols::line::DOUBLE)
-			.ratio(progress.percents());
-
 		let area = Rect::new(0, frame.size().height-1, frame.size().width, 1);
-		frame.render_widget(Text::from("     "), area);
-    		frame.render_widget(gauge, area);
+
+		if progress.size > 0 {
+			let gauge = LineGauge::default()
+				.style(self.ui_accent)
+				.gauge_style(self.ui_accent.on_dark_gray())
+				.line_set(symbols::line::DOUBLE)
+				.ratio(progress.percents());
+
+			frame.render_widget(Text::from("     "), area);
+			frame.render_widget(gauge, area);
+		} else {
+			let locale = SystemLocale::default().unwrap();
+			let copied_bytes = format!(" {} bytes copied ",
+				progress.copied.to_formatted_string(&locale));
+
+			let block = Block::default()
+				.title(Title::from(copied_bytes.set_style(self.ui_accent))
+					.alignment(Alignment::Center))
+				.borders(Borders::BOTTOM)
+				.border_style(Style::new().dark_gray())
+				.border_type(BorderType::Double);
+
+			frame.render_widget(block, area);
+		}
 	}
 
 	fn render_victory(&self, frame: &mut Frame) {
