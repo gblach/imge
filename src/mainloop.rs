@@ -426,6 +426,7 @@ impl Mainloop {
 			};
 
 			let from_drive = self.args.from_drive;
+			let image_mime_type = self.image_mime_type.clone();
 			let progress = Arc::new(Mutex::new(imge::Progress::default()));
 			let error = self.error.clone();
 
@@ -433,7 +434,9 @@ impl Mainloop {
 			self.modal = Modal::Progress;
 
 			thread::spawn(move || {
-				if let Err(err) = imge::copy(&src, &dest, from_drive, &progress) {
+				let result = imge::copy(&src, &dest,
+					from_drive, image_mime_type, &progress);
+				if let Err(err) = result {
 					*error.lock().unwrap() = Some(err);
 				}
 			});

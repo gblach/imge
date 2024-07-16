@@ -3,6 +3,7 @@
 //  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use libarchive3_sys::ffi::*;
+use mime::Mime;
 use std::ffi::{c_void, CString, OsString};
 use std::fs::File;
 use std::io;
@@ -72,12 +73,14 @@ pub struct Path {
 	pub size: Option<u64>,
 }
 
-pub fn copy(src: &Path, dest: &Path, from_drive: bool, progress_mutex: &Arc<Mutex<Progress>>)
-	-> io::Result<()> {
+pub fn copy(src: &Path, dest: &Path, from_drive: bool, image_mime_type: Mime,
+	progress_mutex: &Arc<Mutex<Progress>>) -> io::Result<()> {
 
-	if let (Some(ssize), Some(dsize)) = (src.size, dest.size) {
-		if ssize > dsize {
-			return Err(io::Error::other("File too large (os error 27)"));
+	if !from_drive {
+		if let (Some(ssize), Some(dsize)) = (src.size, dest.size) {
+			if ssize > dsize {
+				return Err(io::Error::other("File too large (os error 27)"));
+			}
 		}
 	}
 
@@ -93,19 +96,21 @@ pub fn copy(src: &Path, dest: &Path, from_drive: bool, progress_mutex: &Arc<Mute
 			},
 			true => {
 				let a = archive_write_new();
-				// none  -> 0
-				// gzip  -> 1
-				// bzip2 -> 2
-				// xz    -> 6
-				// zstd  -> 14
-				archive_write_add_filter(a, 1);
+				let filter = match image_mime_type.essence_str() {
+					"application/gzip" => 1,
+					"application/x-bzip2" => 2,
+					"application/x-xz" => 6,
+					"application/zstd" => 14,
+					_ => 0,
+				};
+				archive_write_add_filter(a, filter);
 				archive_write_set_format(a, 0x90000); // RAW
 				a
 			},
 		}
 	};
 
-	if !from_drive {
+	let ae = if !from_drive {
 		unsafe {
 			let srcfilename = CString::new(src.path.as_bytes()).unwrap();
 			let rc = archive_read_open_filename(a, srcfilename.as_ptr(), 1024 * 1024);
@@ -119,8 +124,25 @@ pub fn copy(src: &Path, dest: &Path, from_drive: bool, progress_mutex: &Arc<Mute
 			if rc != ARCHIVE_OK {
 				return Err(io::Error::other("Cannot read file header"));
 			}
-		};
-	}
+			ae
+		}
+	} else {
+		unsafe {
+			let destfilename = CString::new(dest.path.as_bytes()).unwrap();
+			let rc = archive_write_open_filename(a, destfilename.as_ptr());
+			if rc != ARCHIVE_OK {
+				return Err(io::Error::other("Cannot open file for writing"));
+			}
+
+			let ae = archive_entry_new2(a);
+			archive_entry_set_filetype(ae, AE_IFREG);
+			let rc = archive_write_header(a, ae);
+			if rc != ARCHIVE_OK {
+				return Err(io::Error::other("Cannot write file header"));
+			}
+			ae
+		}
+	};
 
 	let mut destfile = File::create(&dest.path)?;
 	let mut buffer = [0; 1024 * 1024];
@@ -142,15 +164,28 @@ pub fn copy(src: &Path, dest: &Path, from_drive: bool, progress_mutex: &Arc<Mute
 			break;
 		}
 
-		destfile.write_all(&buffer[..(len as usize)])?;
-		destfile.sync_data()?;
+		if from_drive && image_mime_type != mime::APPLICATION_OCTET_STREAM {
+			unsafe {
+				archive_write_data(a, buffer_ptr, len as usize);
+			}
+		} else {
+			destfile.write_all(&buffer[..(len as usize)])?;
+			destfile.sync_data()?;
+		}
 
 		let mut progress = progress_mutex.lock().unwrap();
 		progress.copied += len as u64;
 	}
 
 	unsafe {
-		archive_read_free(a);
+		if !from_drive {
+			archive_read_close(a);
+			archive_read_free(a);
+		} else {
+			archive_entry_free(ae);
+			archive_write_close(a);
+			archive_write_free(a);
+		}
 	}
 
 	let mut progress = progress_mutex.lock().unwrap();
