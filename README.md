@@ -1,6 +1,6 @@
 # imge
 
-Write disk images to physical drive or vice versa.
+Write disk images to physical drive or vice versa with on-the-fly compression/decompression.
 
 ## Install
 
@@ -33,6 +33,9 @@ Options:
 
 `Imge` is a TUI tool for writing disk images to removable (by default) or non-removable
 (by `-a` option) drives. It also has an option to copy the drive to the disk image.
+When copying from image to disk and the image is compressed, the image is decompressed on the fly.
+When copying from disk to image and the image ends in .gz, .bz2 or .xz,
+the image is compressed on the fly.
 It's intended to be an easier to use and less error-prone than `dd`,
 since choosing the wrong disk may have a big impact on the data on your hard drive.
 
@@ -44,7 +47,6 @@ since choosing the wrong disk may have a big impact on the data on your hard dri
 
 ## TODO
 
-- Compress/decompress image on the fly.
 - Verify if data was copied correctly.
 - Verify checksum before making copy.
 - Support copying /dev/zero and /dev/urandom to the drive.
