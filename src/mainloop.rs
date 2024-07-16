@@ -7,6 +7,7 @@ use derivative::Derivative;
 use mime::Mime;
 use num_format::{SystemLocale, ToFormattedString};
 use ratatui::prelude::*;
+use ratatui::style::Styled;
 use ratatui::widgets::{*, block::*};
 use std::ffi::OsString;
 use std::io;
@@ -313,7 +314,7 @@ impl Mainloop {
 		if progress.size > 0 {
 			let gauge = LineGauge::default()
 				.style(self.ui_accent)
-				.gauge_style(self.ui_accent.on_dark_gray())
+				.unfilled_style(Color::DarkGray)
 				.line_set(symbols::line::DOUBLE)
 				.ratio(progress.percents());
 
