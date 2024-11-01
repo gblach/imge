@@ -7,8 +7,7 @@ use derivative::Derivative;
 use mime::Mime;
 use num_format::{SystemLocale, ToFormattedString};
 use ratatui::prelude::*;
-use ratatui::style::Styled;
-use ratatui::widgets::{*, block::*};
+use ratatui::widgets::*;
 use std::ffi::OsString;
 use std::io;
 use std::path::Path;
@@ -138,7 +137,7 @@ impl Mainloop {
 
 		let p = Paragraph::new(vec![header])
 			.wrap(Wrap { trim: true }).centered().block(block);
-		frame.render_widget(p, frame.size());
+		frame.render_widget(p, frame.area());
 
 		if self.modal == Modal::None || self.modal == Modal::Keybindings {
 			let info = Line::from(vec![
@@ -146,7 +145,7 @@ impl Mainloop {
 				Span::styled("<i>", self.ui_accent),
 				" to display keybindings.".into()
 			]);
-			let area = Rect::new(0, frame.size().height-2, frame.size().width, 1);
+			let area = Rect::new(0, frame.area().height-2, frame.area().width, 1);
 			frame.render_widget(info, area);
 		}
 	}
@@ -159,10 +158,10 @@ impl Mainloop {
 
 			row.push(Cell::from(drive.name.to_string_lossy()));
 			row.push(Cell::from(drive.model.clone()));
-			if frame.size().width > 160 {
+			if frame.area().width > 160 {
 				row.push(Cell::from(drive.serial.clone()));
 			}
-			if frame.size().width > 80 {
+			if frame.area().width > 80 {
 				let is_removable = if drive.is_removable {
 					"Removable"
 				} else {
@@ -170,7 +169,7 @@ impl Mainloop {
 				};
 				row.push(Cell::from(is_removable));
 			}
-			if frame.size().width > 120 {
+			if frame.area().width > 120 {
 				let is_mounted = if drive.is_mounted {
 					"Mounted"
 				} else {
@@ -188,31 +187,33 @@ impl Mainloop {
 
 		widths.push(Constraint::Fill(2));
 		widths.push(Constraint::Fill(3));
-		if frame.size().width > 160 {
+		if frame.area().width > 160 {
 			widths.push(Constraint::Fill(2));
 		}
-		if frame.size().width > 80 {
+		if frame.area().width > 80 {
 			widths.push(Constraint::Fill(2));
 		}
-		if frame.size().width > 120 {
+		if frame.area().width > 120 {
 			widths.push(Constraint::Fill(2));
 		}
 		widths.push(Constraint::Fill(1));
 
 		let table = Table::new(rows, widths)
 			.highlight_symbol("-> ")
-			.highlight_style(self.ui_accent);
+			.row_highlight_style(self.ui_accent);
 
 		let mut state = TableState::default();
 		state.select(Some(self.selected_row));
 
-		let area = Rect::new(0, 3, frame.size().width, frame.size().height-3);
+		let area = Rect::new(0, 3, frame.area().width, frame.area().height-3);
 		frame.render_stateful_widget(table, area, &mut state);
 	}
 
 	fn render_modal(&self, frame: &mut Frame, title: &str, lines: Vec<Line>) {
 		let block = Block::default()
-			.title(Title::from(title.bold()).alignment(Alignment::Center))
+			.title_top(title)
+			.title_style(Style::new().add_modifier(Modifier::BOLD))
+			.title_alignment(Alignment::Center)
 			.borders(Borders::ALL)
 			.border_style(Style::new().dark_gray())
 			.border_type(BorderType::Rounded);
@@ -221,8 +222,8 @@ impl Mainloop {
 
 		let w = 72;
 		let h = 10;
-		let x = (frame.size().width - w) / 2;
-		let y = (frame.size().height - h) / 2;
+		let x = (frame.area().width - w) / 2;
+		let y = (frame.area().height - h) / 2;
 		let area = Rect::new(x, y, w, h);
 
 		frame.render_widget(p, area);
@@ -309,7 +310,7 @@ impl Mainloop {
 
 	fn render_progress(&self, frame: &mut Frame) {
 		let progress = self.progress.as_ref().unwrap().lock().unwrap();
-		let area = Rect::new(0, frame.size().height-1, frame.size().width, 1);
+		let area = Rect::new(0, frame.area().height-1, frame.area().width, 1);
 
 		if progress.size > 0 {
 			let gauge = LineGauge::default()
@@ -326,8 +327,9 @@ impl Mainloop {
 				progress.copied.to_formatted_string(&locale));
 
 			let block = Block::default()
-				.title(Title::from(copied_bytes.set_style(self.ui_accent))
-					.alignment(Alignment::Center))
+				.title_top(copied_bytes)
+				.title_style(self.ui_accent)
+				.title_alignment(Alignment::Center)
 				.borders(Borders::BOTTOM)
 				.border_style(Style::new().dark_gray())
 				.border_type(BorderType::Double);
