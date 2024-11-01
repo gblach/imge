@@ -20,6 +20,10 @@ struct Args {
 	#[argh(switch, short='a')]
 	all_drives: bool,
 
+	/// use this drive, do not ask
+	#[argh(option, short='d')]
+	drive: Option<OsString>,
+
 	/// copy drive to image (instead of image to drive)
 	#[argh(switch, short='f')]
 	from_drive: bool,

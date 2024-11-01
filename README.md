@@ -50,4 +50,3 @@ since choosing the wrong disk may have a big impact on the data on your hard dri
 - Verify if data was copied correctly.
 - Verify checksum before making copy.
 - Support copying /dev/zero and /dev/urandom to the drive.
-- Implement non-interactive mode.
