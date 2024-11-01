@@ -54,15 +54,9 @@ impl Mainloop {
 
 		let image_path = Path::new(&args.image);
 		let image_basename = image_path.file_name().unwrap().to_string_lossy().to_string();
-
-		let image_mime_type = match args.from_drive {
-			false => tree_magic_mini::from_filepath(image_path)
-				.unwrap_or(mime::APPLICATION_OCTET_STREAM.as_ref())
-				.parse().unwrap(),
-			true => mime_guess::from_ext(
-				&image_path.extension().unwrap_or_default().to_string_lossy())
-				.first_or_octet_stream(),
-		};
+		let image_mime_type = mime_guess::from_ext(
+			&image_path.extension().unwrap_or_default().to_string_lossy())
+			.first_or_octet_stream();
 
 		Self {
 			args: args.clone(),
