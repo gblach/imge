@@ -48,8 +48,8 @@ pub struct Mainloop {
 impl Mainloop {
 	pub fn new(args: Args) -> Self {
 		let ui_accent = match args.from_drive {
-			false => Style::new().light_magenta(),
-			true => Style::new().light_yellow(),
+			false => Style::new().magenta(),
+			true => Style::new().yellow(),
 		};
 
 		let image_path = Path::new(&args.image);
@@ -86,18 +86,18 @@ impl Mainloop {
 			else if let Some(progress) = &self.progress {
 				if progress.lock().unwrap().finished {
 					self.modal = Modal::Victory;
+				} else {
+					self.modal = Modal::Progress;
 				}
 			}
 
 			terminal.draw(|frame| {
 				self.render_window(frame);
 				self.render_drives(frame);
-				if self.progress.is_some() {
-					self.render_progress(frame);
-				}
 				match self.modal {
 					Modal::Keybindings => self.render_keybindings(frame),
 					Modal::Warning => self.render_warning(frame),
+					Modal::Progress => self.render_progress(frame),
 					Modal::Victory => self.render_victory(frame),
 					Modal::Error => self.render_error(frame),
 					_ => {},
@@ -117,11 +117,6 @@ impl Mainloop {
 	}
 
 	fn render_window(&self, frame: &mut Frame) {
-		let block = Block::default()
-			.borders(Borders::BOTTOM)
-			.border_style(Style::new().dark_gray())
-			.border_type(BorderType::Double);
-
 		let header = match self.args.from_drive {
 			false => Line::from(vec![
 				"Select the drive you wanna copy ".into(),
@@ -135,8 +130,7 @@ impl Mainloop {
 			]),
 		};
 
-		let p = Paragraph::new(vec![header])
-			.wrap(Wrap { trim: true }).centered().block(block);
+		let p = Paragraph::new(vec![header]).wrap(Wrap { trim: true }).centered();
 		frame.render_widget(p, frame.area());
 
 		if self.modal == Modal::None || self.modal == Modal::Keybindings {
@@ -145,7 +139,7 @@ impl Mainloop {
 				Span::styled("<i>", self.ui_accent),
 				" to display keybindings.".into()
 			]);
-			let area = Rect::new(0, frame.area().height-2, frame.area().width, 1);
+			let area = Rect::new(0, frame.area().height-1, frame.area().width, 1);
 			frame.render_widget(info, area);
 		}
 	}
@@ -231,7 +225,7 @@ impl Mainloop {
 
 	fn render_keybindings(&self, frame: &mut Frame) {
 		let lines = vec![
-			Line::from(vec![]),
+			Line::from(""),
 			Line::from(vec![
 				Span::styled("<a>      ", self.ui_accent),
 				"Show all/removable drives        ".into(),
@@ -274,10 +268,10 @@ impl Mainloop {
 		};
 
 		let mut lines = Vec::with_capacity(6);
-		lines.push(Line::from(vec![]));
+		lines.push(Line::from(""));
 
 		if self.args.from_drive {
-			lines.push(Line::from(vec![]));
+			lines.push(Line::from(""));
 		}
 
 		lines.push(Line::from(vec![
@@ -289,13 +283,11 @@ impl Mainloop {
 		]));
 
 		if !self.args.from_drive {
-			lines.push(Line::from(vec![
-				"This is something that cannot be undone.".into(),
-			]));
+			lines.push(Line::from("This is something that cannot be undone."));
 		}
 
-		lines.push(Line::from(vec![]));
-		lines.push(Line::from(vec![]));
+		lines.push(Line::from(""));
+		lines.push(Line::from(""));
 
 		lines.push(Line::from(vec![
 			Span::styled("<esc> ", self.ui_accent),
@@ -310,31 +302,38 @@ impl Mainloop {
 
 	fn render_progress(&self, frame: &mut Frame) {
 		let progress = self.progress.as_ref().unwrap().lock().unwrap();
-		let area = Rect::new(0, frame.area().height-1, frame.area().width, 1);
+		let area = Rect::new(0, (frame.area().height - 5) / 2, frame.area().width, 5);
 
 		if progress.size > 0 {
-			let gauge = LineGauge::default()
-				.style(self.ui_accent)
-				.unfilled_style(Color::DarkGray)
-				.line_set(symbols::line::DOUBLE)
-				.ratio(progress.percents());
+			let block = Block::default()
+				.title_top(" Copying ")
+				.title_style(Style::new().add_modifier(Modifier::BOLD))
+				.title_alignment(Alignment::Center)
+				.borders(Borders::ALL)
+				.border_style(Style::new().dark_gray())
+				.border_type(BorderType::Rounded);
 
-			frame.render_widget(Text::from("     "), area);
+			let gauge = Gauge::default()
+				.gauge_style(self.ui_accent)
+				.style(Style::new().bold())
+				.ratio(progress.percents())
+				.label(format!("{:.1} %", progress.percents() * 100.0))
+				.block(block);
+
 			frame.render_widget(gauge, area);
 		} else {
 			let locale = SystemLocale::default().unwrap();
 			let copied_bytes = format!(" {} bytes copied ",
 				progress.copied.to_formatted_string(&locale));
 
-			let block = Block::default()
-				.title_top(copied_bytes)
-				.title_style(self.ui_accent)
-				.title_alignment(Alignment::Center)
-				.borders(Borders::BOTTOM)
-				.border_style(Style::new().dark_gray())
-				.border_type(BorderType::Double);
+			let lines = vec![
+				Line::from(""),
+				Line::from(""),
+				Line::from(""),
+				Line::from(Span::styled(copied_bytes, self.ui_accent)),
+			];
 
-			frame.render_widget(block, area);
+			self.render_modal(frame, " Copying ", lines);
 		}
 	}
 
@@ -348,7 +347,7 @@ impl Mainloop {
 		};
 
 		let lines = vec![
-			Line::from(vec![]),
+			Line::from(""),
 			Line::from(vec![
 				"Copied ".into(),
 				Span::styled(imge::humanize(progress.copied), self.ui_accent),
@@ -356,14 +355,14 @@ impl Mainloop {
 				Span::styled(progress.secs.to_string(), self.ui_accent),
 				" seconds.".into(),
 			]),
-			Line::from(vec![]),
+			Line::from(""),
 			Line::from(vec![
 				"An average of ".into(),
 				Span::styled(imge::humanize(speed), self.ui_accent),
 				" per second.".into(),
 			]),
-			Line::from(vec![]),
-			Line::from(vec![]),
+			Line::from(""),
+			Line::from(""),
 			Line::from(vec![
 				Span::styled("<esc> ", self.ui_accent),
 				"Close".into(),
@@ -377,12 +376,10 @@ impl Mainloop {
 		let error = self.error.lock().unwrap();
 
 		let lines = vec![
-			Line::from(vec![]),
-			Line::from(vec![
-				Span::raw(error.as_ref().unwrap().to_string()),
-			]),
-			Line::from(vec![]),
-			Line::from(vec![]),
+			Line::from(""),
+			Line::from(Span::raw(error.as_ref().unwrap().to_string())),
+			Line::from(""),
+			Line::from(""),
 			Line::from(vec![
 				Span::styled("<esc> ", self.ui_accent),
 				"Close".into(),
@@ -434,7 +431,7 @@ impl Mainloop {
 			let error = self.error.clone();
 
 			self.progress = Some(progress.clone());
-			self.modal = Modal::Progress;
+			self.modal = Modal::None;
 
 			thread::spawn(move || {
 				let result = imge::copy(&src, &dest,
