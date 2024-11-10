@@ -22,7 +22,8 @@ enum Modal {
 	None,
 	Keybindings,
 	Warning,
-	Progress,
+	Copying,
+	Verifying,
 	Victory,
 	Error,
 }
@@ -83,12 +84,14 @@ impl Mainloop {
 			}
 
 			else if let Some(progress) = &self.progress {
-				if !progress.lock().unwrap().finished {
-					self.modal = Modal::Progress;
-				} else if self.args.drive.is_none() {
-					self.modal = Modal::Victory;
-				} else {
-					self.exit = true;
+				if progress.lock().unwrap().finished {
+					if self.args.verify && self.modal == Modal::Copying {
+						self.start_verifying();
+					} else if self.args.drive.is_none() {
+						self.modal = Modal::Victory;
+					} else {
+						self.exit = true;
+					}
 				}
 			}
 
@@ -98,7 +101,8 @@ impl Mainloop {
 				match self.modal {
 					Modal::Keybindings => self.render_keybindings(frame),
 					Modal::Warning => self.render_warning(frame),
-					Modal::Progress => self.render_progress(frame),
+					Modal::Copying => self.render_copying(frame),
+					Modal::Verifying => self.render_verifying(frame),
 					Modal::Victory => self.render_victory(frame),
 					Modal::Error => self.render_error(frame),
 					_ => {},
@@ -301,9 +305,9 @@ impl Mainloop {
 		self.render_modal(frame, " Warning ", lines);
 	}
 
-	fn render_progress(&self, frame: &mut Frame) {
+	fn render_copying(&self, frame: &mut Frame) {
 		let progress = self.progress.as_ref().unwrap().lock().unwrap();
-		let area = Rect::new(0, (frame.area().height - 5) / 2, frame.area().width, 5);
+		let area = Rect::new(1, (frame.area().height - 5) / 2, frame.area().width - 2, 5);
 
 		if progress.size > 0 {
 			let block = Block::default()
@@ -325,7 +329,7 @@ impl Mainloop {
 		} else {
 			let locale = SystemLocale::default().unwrap();
 			let copied_bytes = format!(" {} bytes copied ",
-				progress.copied.to_formatted_string(&locale));
+				progress.done.to_formatted_string(&locale));
 
 			let lines = vec![
 				Line::from(""),
@@ -338,20 +342,46 @@ impl Mainloop {
 		}
 	}
 
+	fn render_verifying(&self, frame: &mut Frame) {
+		let progress = self.progress.as_ref().unwrap().lock().unwrap();
+		let area = Rect::new(1, (frame.area().height - 5) / 2, frame.area().width - 2, 5);
+
+		let block = Block::default()
+			.title_top(" Verifying ")
+			.title_style(Style::new().add_modifier(Modifier::BOLD))
+			.title_alignment(Alignment::Center)
+			.borders(Borders::ALL)
+			.border_style(Style::new().dark_gray())
+			.border_type(BorderType::Rounded);
+
+		let gauge = Gauge::default()
+			.gauge_style(Style::new().blue())
+			.style(Style::new().bold())
+			.ratio(progress.percents())
+			.label(format!("{:.1} %", progress.percents() * 100.0))
+			.block(block);
+
+		frame.render_widget(gauge, area);
+	}
+
 	fn render_victory(&self, frame: &mut Frame) {
 		let progress = self.progress.as_ref().unwrap().lock().unwrap();
 
 		let speed = if progress.secs > 0 {
-			progress.copied / progress.secs
+			progress.done / progress.secs
 		} else {
-			progress.copied
+			progress.done
 		};
 
 		let lines = vec![
 			Line::from(""),
 			Line::from(vec![
-				"Copied ".into(),
-				Span::styled(imge::humanize(progress.copied), self.ui_accent),
+				if !self.args.verify {
+					"Copied ".into()
+				} else {
+					"Copied and verified ".into()
+				},
+				Span::styled(imge::humanize(progress.done), self.ui_accent),
 				" in ".into(),
 				Span::styled(progress.secs.to_string(), self.ui_accent),
 				" seconds.".into(),
@@ -474,7 +504,7 @@ impl Mainloop {
 		self.selected_size = self.drives[self.selected_row].size;
 	}
 
-	fn start_copying(&mut self) {
+	fn get_paths(&self) -> (imge::Path, imge::Path) {
 		let image_path = imge::Path {
 			path: self.args.image.clone(),
 			size: if self.image_mime_type == mime::APPLICATION_OCTET_STREAM {
@@ -492,22 +522,51 @@ impl Mainloop {
 			size: Some(self.selected_size),
 		};
 
-		let (src, dest) = match self.args.from_drive {
+		match self.args.from_drive {
 			false => (image_path, drive_path),
 			true => (drive_path, image_path),
-		};
+		}
+	}
 
+	fn start_copying(&mut self) {
+		let (src, dest) = self.get_paths();
 		let from_drive = self.args.from_drive;
 		let image_mime_type = self.image_mime_type.clone();
-		let progress = Arc::new(Mutex::new(imge::Progress::default()));
 		let error = self.error.clone();
 
+		let mut progress = imge::Progress::default();
+		progress.size = src.size.unwrap_or_default();
+		let progress = Arc::new(Mutex::new(progress));
+
 		self.progress = Some(progress.clone());
-		self.modal = Modal::None;
+		self.modal = Modal::Copying;
 
 		thread::spawn(move || {
 			let result = imge::copy(&src, &dest,
 				from_drive, image_mime_type, &progress);
+			if let Err(err) = result {
+				*error.lock().unwrap() = Some(err);
+			}
+		});
+	}
+
+	fn start_verifying(&mut self) {
+		let (src, dest) = self.get_paths();
+		let from_drive = self.args.from_drive;
+		let error = self.error.clone();
+
+		let copying_progress = self.progress.as_ref().unwrap().lock().unwrap();
+		let mut progress = imge::Progress::default();
+		progress.size = src.size.unwrap_or(copying_progress.done);
+		progress.secs = copying_progress.secs;
+		let progress = Arc::new(Mutex::new(progress));
+		drop(copying_progress);
+
+		self.progress = Some(progress.clone());
+		self.modal = Modal::Verifying;
+
+		thread::spawn(move || {
+			let result = imge::verify(&src, &dest, from_drive, &progress);
 			if let Err(err) = result {
 				*error.lock().unwrap() = Some(err);
 			}

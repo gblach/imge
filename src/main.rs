@@ -28,6 +28,10 @@ struct Args {
 	#[argh(switch, short='f')]
 	from_drive: bool,
 
+	/// verify if data was copied correctly
+	#[argh(switch, short='v')]
+	verify: bool,
+
 	/// path to image
 	#[argh(positional)]
 	image: OsString,
