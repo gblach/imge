@@ -166,8 +166,8 @@ pub fn copy(src: &Path, dest: &Path, from_drive: bool, image_mime_type: Mime,
 		.custom_flags(libc::O_DSYNC).open(&dest.path)?;
 
 	let (a, ae) = match from_drive {
-		false => libarchive_open_for_reading(&src)?,
-		true => libarchive_open_for_writing(&dest, image_mime_type.clone())?,
+		false => libarchive_open_for_reading(src)?,
+		true => libarchive_open_for_writing(dest, image_mime_type.clone())?,
 	};
 
 	let mut buffer = [0; BLOCK_SIZE];
@@ -218,8 +218,8 @@ pub fn verify(src: &Path, dest: &Path, from_drive: bool,
 		.custom_flags(libc::O_DIRECT).open(&dest.path)?;
 
 	let (a, _ae) = match from_drive {
-		false => libarchive_open_for_reading(&src)?,
-		true => libarchive_open_for_reading(&dest)?,
+		false => libarchive_open_for_reading(src)?,
+		true => libarchive_open_for_reading(dest)?,
 	};
 
 
@@ -228,7 +228,7 @@ pub fn verify(src: &Path, dest: &Path, from_drive: bool,
 	let destbuffer_ptr = unsafe {
 		alloc(Layout::from_size_align(BLOCK_SIZE, BLOCK_SIZE).unwrap())
 	};
-	let mut destbuffer = unsafe {
+	let destbuffer = unsafe {
 		std::slice::from_raw_parts_mut(destbuffer_ptr, BLOCK_SIZE)
 	};
 
@@ -246,13 +246,13 @@ pub fn verify(src: &Path, dest: &Path, from_drive: bool,
 		}
 
 		match from_drive {
-			false => destfile.read(&mut destbuffer)? as isize,
+			false => destfile.read(destbuffer)? as isize,
 			true => unsafe {
 				archive_read_data(a, destbuffer_ptr as *mut c_void, BLOCK_SIZE)
 			},
 		};
 
-		if &srcbuffer[..len as usize] != &destbuffer[..len as usize] {
+		if srcbuffer[..len as usize] != destbuffer[..len as usize] {
 			return Err(io::Error::other("Verification failed"));
 		}
 

@@ -534,9 +534,10 @@ impl Mainloop {
 		let image_mime_type = self.image_mime_type.clone();
 		let error = self.error.clone();
 
-		let mut progress = imge::Progress::default();
-		progress.size = src.size.unwrap_or_default();
-		let progress = Arc::new(Mutex::new(progress));
+		let progress = Arc::new(Mutex::new(imge::Progress {
+			size: src.size.unwrap_or_default(),
+			..Default::default()
+		}));
 
 		self.progress = Some(progress.clone());
 		self.modal = Modal::Copying;
@@ -556,10 +557,11 @@ impl Mainloop {
 		let error = self.error.clone();
 
 		let copying_progress = self.progress.as_ref().unwrap().lock().unwrap();
-		let mut progress = imge::Progress::default();
-		progress.size = src.size.unwrap_or(copying_progress.done);
-		progress.secs = copying_progress.secs;
-		let progress = Arc::new(Mutex::new(progress));
+		let progress = Arc::new(Mutex::new(imge::Progress {
+			size: src.size.unwrap_or(copying_progress.done),
+			secs: copying_progress.secs,
+			..Default::default()
+		}));
 		drop(copying_progress);
 
 		self.progress = Some(progress.clone());
