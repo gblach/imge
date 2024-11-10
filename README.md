@@ -18,14 +18,16 @@ $ export PATH=$PATH:~/.cargo/bin
 ## Synopsis
 
 ```
-imge <image> [-a] [-f]
+imge <image> [-a] [-d <drive>] [-f] [-v]
 
 Positional Arguments:
   image             path to image
 
 Options:
   -a, --all-drives  show all drives
+  -d, --drive       use this drive, do not ask
   -f, --from-drive  copy drive to image (instead of image to drive)
+  -v, --verify      verify if data was copied correctly
   --help            display usage information
 ```
 
@@ -39,14 +41,14 @@ the image is compressed on the fly.
 It's intended to be an easier to use and less error-prone than `dd`,
 since choosing the wrong disk may have a big impact on the data on your hard drive.
 
-![main](https://raw.githubusercontent.com/gblach/imge/5350e5d/screenshots/1-main.avif)
-![keybindings](https://raw.githubusercontent.com/gblach/imge/5350e5d/screenshots/2-keybindings.avif)
-![warning](https://raw.githubusercontent.com/gblach/imge/5350e5d/screenshots/3-warning.avif)
-![progress](https://raw.githubusercontent.com/gblach/imge/5350e5d/screenshots/4-progress.avif)
-![victory](https://raw.githubusercontent.com/gblach/imge/5350e5d/screenshots/5-victory.avif)
+![main](https://raw.githubusercontent.com/gblach/imge/e9ac4a0/screenshots/1-main.avif)
+![keybindings](https://raw.githubusercontent.com/gblach/imge/e9ac4a0/screenshots/2-keybindings.avif)
+![warning](https://raw.githubusercontent.com/gblach/imge/e9ac4a0/screenshots/3-warning.avif)
+![copying](https://raw.githubusercontent.com/gblach/imge/e9ac4a0/screenshots/4-copying.avif)
+![verifying](https://raw.githubusercontent.com/gblach/imge/e9ac4a0/screenshots/5-verifying.avif)
+![victory](https://raw.githubusercontent.com/gblach/imge/e9ac4a0/screenshots/6-victory.avif)
 
 ## TODO
 
-- Verify if data was copied correctly.
 - Verify checksum before making copy.
 - Support copying /dev/zero and /dev/urandom to the drive.
