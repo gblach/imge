@@ -222,7 +222,6 @@ pub fn verify(src: &Path, dest: &Path, from_drive: bool,
 		true => libarchive_open_for_reading(dest)?,
 	};
 
-
 	let mut srcbuffer = [0; BLOCK_SIZE];
 	let srcbuffer_ptr = srcbuffer.as_mut_ptr() as *mut c_void;
 	let destbuffer_ptr = unsafe {

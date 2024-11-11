@@ -12,12 +12,12 @@ categories = ["command-line-utilities", "filesystem", "hardware-support"]
 [dependencies]
 argh = "0.1"
 crossterm = "0.28"
-derivative = "2.2"
+derivative = "2"
 drives = "0.6"
 libarchive3-sys = "0.1"
 libc = "0.2"
 mime = "0.3"
-mime_guess = "2.0"
+mime_guess = "2"
 num-format = { version = "0.4", features = ["with-system-locale"] }
 ratatui = "0.29"
 
