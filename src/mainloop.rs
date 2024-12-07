@@ -2,9 +2,10 @@
 //  License, v. 2.0. If a copy of the MPL was not distributed with this
 //  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use crate::Args;
+use crate::imge;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use derivative::Derivative;
-use mime::Mime;
 use num_format::{SystemLocale, ToFormattedString};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
@@ -13,8 +14,6 @@ use std::io;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use super::Args;
-use super::imge;
 
 #[derive(Default, PartialEq)]
 enum Modal {
@@ -34,14 +33,13 @@ pub struct Mainloop {
 	args: Args,
 	ui_accent: Style,
 	image_basename: String,
-	#[derivative(Default(value="mime::APPLICATION_OCTET_STREAM"))]
-	image_mime_type: Mime,
+	image_compression: imge::Compression,
 	drives: Vec<imge::Drive>,
 	selected_row: usize,
-	selected_name: Option<OsString>,
+	selected_drive: Option<OsString>,
 	selected_size: u64,
 	modal: Modal,
-	progress: Option<Arc<Mutex<imge::Progress>>>,
+	progress: Option<imge::ProgressMutex>,
 	error: Arc<Mutex<Option<io::Error>>>,
 	exit: bool,
 }
@@ -55,16 +53,22 @@ impl Mainloop {
 
 		let image_path = Path::new(&args.image);
 		let image_basename = image_path.file_name().unwrap().to_string_lossy().to_string();
-		let image_mime_type = mime_guess::from_ext(
-			&image_path.extension().unwrap_or_default().to_string_lossy())
-			.first_or_octet_stream();
+
+		let ext = image_path.extension().unwrap_or_default().to_string_lossy().to_string();
+		let image_compression = match ext.as_str() {
+			"gz" => imge::Compression::Gzip,
+			"bz2" => imge::Compression::Bzip2,
+			"xz" => imge::Compression::Xz,
+			"zst" => imge::Compression::Zstd,
+			_ => imge::Compression::None,
+		};
 
 		Self {
 			args: args.clone(),
 			ui_accent,
 			image_basename,
-			image_mime_type,
-			selected_name: args.drive,
+			image_compression,
+			selected_drive: args.drive,
 			..Default::default()
 		}
 	}
@@ -261,15 +265,12 @@ impl Mainloop {
 	}
 
 	fn render_warning(&self, frame: &mut Frame) {
+		let drive_path = self.selected_drive.clone().unwrap()
+			.to_string_lossy().to_string();
+
 		let (src, dest) = match self.args.from_drive {
-			false => (
-				&self.image_basename,
-				&self.selected_name.clone().unwrap().to_string_lossy().to_string(),
-			),
-			true => (
-				&self.selected_name.clone().unwrap().to_string_lossy().to_string(),
-				&self.image_basename,
-			),
+			false => (&self.image_basename, &drive_path),
+			true => (&drive_path, &self.image_basename),
 		};
 
 		let mut lines = Vec::with_capacity(6);
@@ -459,7 +460,7 @@ impl Mainloop {
 					}
 				},
 				KeyCode::Enter => {
-					if self.selected_name.is_some() {
+					if self.selected_drive.is_some() {
 						self.modal = Modal::Warning;
 					}
 				},
@@ -479,11 +480,11 @@ impl Mainloop {
 
 	fn update_drives(&mut self, refresh: bool) {
 		if refresh {
-			self.drives = imge::list(self.args.all_drives);
+			self.drives = imge::list_drives(self.args.all_drives);
 			self.selected_row = 0;
 
 			for i in 0..self.drives.len() {
-				if self.selected_name == Some(self.drives[i].name.clone()) {
+				if self.selected_drive == Some(self.drives[i].name.clone()) {
 					self.selected_row = i;
 					break;
 				}
@@ -494,20 +495,21 @@ impl Mainloop {
 			}
 
 			if self.drives.is_empty() {
-				self.selected_name = None;
+				self.selected_drive = None;
 				self.selected_size = 0;
 				return;
 			}
 		}
 
-		self.selected_name.clone_from(&Some(self.drives[self.selected_row].name.clone()));
+		self.selected_drive.clone_from(&Some(self.drives[self.selected_row].name.clone()));
 		self.selected_size = self.drives[self.selected_row].size;
 	}
 
-	fn get_paths(&self) -> (imge::Path, imge::Path) {
-		let image_path = imge::Path {
+	fn get_volumes(&self) -> (imge::Volume, imge::Volume) {
+		let image = imge::Volume {
+			vtype: imge::VolumeType::Image,
 			path: self.args.image.clone(),
-			size: if self.image_mime_type == mime::APPLICATION_OCTET_STREAM {
+			size: if self.image_compression == imge::Compression::None {
 				match std::fs::metadata(&self.args.image) {
 					Ok(metadata) => Some(metadata.len()),
 					Err(_) => None,
@@ -515,24 +517,27 @@ impl Mainloop {
 			} else {
 				None
 			},
+			compression: self.image_compression,
 		};
 
-		let drive_path = imge::Path {
-			path: self.selected_name.clone().unwrap(),
+		let drive = imge::Volume {
+			vtype: imge::VolumeType::Drive,
+			path: self.selected_drive.clone().unwrap(),
 			size: Some(self.selected_size),
+			compression: imge::Compression::None,
 		};
 
-		match self.args.from_drive {
-			false => (image_path, drive_path),
-			true => (drive_path, image_path),
-		}
+		(image, drive)
 	}
 
 	fn start_copying(&mut self) {
-		let (src, dest) = self.get_paths();
-		let from_drive = self.args.from_drive;
-		let image_mime_type = self.image_mime_type.clone();
+		let (image, drive) = self.get_volumes();
 		let error = self.error.clone();
+
+		let (src, dest) = match self.args.from_drive {
+			false => (image, drive),
+			true => (drive, image),
+		};
 
 		let progress = Arc::new(Mutex::new(imge::Progress {
 			size: src.size.unwrap_or_default(),
@@ -543,8 +548,7 @@ impl Mainloop {
 		self.modal = Modal::Copying;
 
 		thread::spawn(move || {
-			let result = imge::copy(&src, &dest,
-				from_drive, image_mime_type, &progress);
+			let result = imge::copy(&src, &dest, &progress);
 			if let Err(err) = result {
 				*error.lock().unwrap() = Some(err);
 			}
@@ -552,13 +556,16 @@ impl Mainloop {
 	}
 
 	fn start_verifying(&mut self) {
-		let (src, dest) = self.get_paths();
-		let from_drive = self.args.from_drive;
+		let (image, drive) = self.get_volumes();
 		let error = self.error.clone();
 
 		let copying_progress = self.progress.as_ref().unwrap().lock().unwrap();
 		let progress = Arc::new(Mutex::new(imge::Progress {
-			size: src.size.unwrap_or(copying_progress.done),
+			size: if copying_progress.size > 0 {
+				copying_progress.size
+			} else {
+				copying_progress.done
+			},
 			secs: copying_progress.secs,
 			..Default::default()
 		}));
@@ -568,7 +575,7 @@ impl Mainloop {
 		self.modal = Modal::Verifying;
 
 		thread::spawn(move || {
-			let result = imge::verify(&src, &dest, from_drive, &progress);
+			let result = imge::verify(&image, &drive, &progress);
 			if let Err(err) = result {
 				*error.lock().unwrap() = Some(err);
 			}

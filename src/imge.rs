@@ -2,14 +2,10 @@
 //  License, v. 2.0. If a copy of the MPL was not distributed with this
 //  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use libarchive3_sys::ffi::*;
-use mime::Mime;
 use std::alloc::{alloc, Layout};
-use std::ffi::{c_void, CString, OsString};
+use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
-use std::io::prelude::*;
-use std::io::{self, Read};
-use std::os::unix::ffi::OsStrExt;
+use std::io::{self, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -25,7 +21,50 @@ pub struct Drive {
 	pub size: u64,
 }
 
-pub fn list(all_drives: bool) -> Vec<Drive> {
+#[derive(PartialEq)]
+pub enum VolumeType {
+	Image,
+	Drive,
+}
+
+#[derive(Copy, Clone, Default, PartialEq)]
+pub enum Compression {
+	#[default]
+	None,
+	Gzip,
+	Bzip2,
+	Xz,
+	Zstd,
+}
+
+pub struct Volume {
+	pub vtype: VolumeType,
+	pub path: OsString,
+	pub size: Option<u64>,
+	pub compression: Compression,
+}
+
+#[derive(Default)]
+pub struct Progress {
+	pub size: u64,
+	pub done: u64,
+	pub secs: u64,
+	pub finished: bool,
+}
+
+impl Progress {
+	pub fn percents(&self) -> f64 {
+		if self.size == 0 {
+			0.0
+		} else {
+			self.done as f64 / self.size as f64
+		}
+	}
+}
+
+pub type ProgressMutex = Arc<Mutex<Progress>>;
+
+pub fn list_drives(all_drives: bool) -> Vec<Drive> {
 	let mut drives = Vec::new();
 
 	for device in drives::get_devices().unwrap() {
@@ -54,154 +93,70 @@ pub fn list(all_drives: bool) -> Vec<Drive> {
 	drives
 }
 
-#[derive(Default)]
-pub struct Progress {
-	pub size: u64,
-	pub done: u64,
-	pub secs: u64,
-	pub finished: bool,
-}
+fn open_for_reading(vol: &Volume) -> io::Result<Box<dyn Read>> {
+	let file = File::open(&vol.path)?;
 
-impl Progress {
-	pub fn percents(&self) -> f64 {
-		if self.size == 0 {
-			0.0
-		} else {
-			self.done as f64 / self.size as f64
-		}
-	}
-}
-
-pub struct Path {
-	pub path: OsString,
-	pub size: Option<u64>,
-}
-
-fn libarchive_open_for_reading(path: &Path)
-	-> io::Result<(*mut Struct_archive, *mut Struct_archive_entry)> {
-
-	let filename = CString::new(path.path.as_bytes()).unwrap();
-
-	unsafe {
-		let a = archive_read_new();
-		archive_read_support_filter_all(a);
-		archive_read_support_format_raw(a);
-
-		let rc = archive_read_open_filename(a, filename.as_ptr(), BLOCK_SIZE);
-		if rc != ARCHIVE_OK {
-			return Err(io::Error::other("Cannot open file for reading"));
-		}
-
-		let ae = archive_entry_new2(a);
-		let ae_ptr = ae as *mut *mut Struct_archive_entry;
-		let rc = archive_read_next_header(a, ae_ptr);
-		if rc != ARCHIVE_OK {
-			return Err(io::Error::other("Cannot read file header"));
-		}
-
-		Ok((a, ae))
-	}
-}
-
-fn libarchive_open_for_writing(path: &Path, image_mime_type: Mime)
-	-> io::Result<(*mut Struct_archive, *mut Struct_archive_entry)> {
-
-	let filename = CString::new(path.path.as_bytes()).unwrap();
-
-	unsafe {
-		let a = archive_write_new();
-		let filter = match image_mime_type.essence_str() {
-			"application/gzip" => 1,
-			"application/x-bzip2" => 2,
-			"application/x-xz" => 6,
-			"application/zstd" => 14,
-			_ => 0,
-		};
-		archive_write_add_filter(a, filter);
-		archive_write_set_format(a, 0x90000); // RAW
-
-		let rc = archive_write_open_filename(a, filename.as_ptr());
-		if rc != ARCHIVE_OK {
-			return Err(io::Error::other("Cannot open file for writing"));
-		}
-
-		let ae = archive_entry_new2(a);
-		archive_entry_set_filetype(ae, AE_IFREG);
-		let rc = archive_write_header(a, ae);
-		if rc != ARCHIVE_OK {
-			return Err(io::Error::other("Cannot write file header"));
-		}
-
-		Ok((a, ae))
-	}
-}
-
-fn libarchive_close_for_reading(a: *mut Struct_archive) {
-	unsafe {
-		archive_read_close(a);
-		archive_read_free(a);
-	}
-}
-
-fn libarchive_close_for_writing(a: *mut Struct_archive, ae: *mut Struct_archive_entry) {
-	unsafe {
-		archive_entry_free(ae);
-		archive_write_close(a);
-		archive_write_free(a);
-	}
-}
-
-pub fn copy(src: &Path, dest: &Path, from_drive: bool, image_mime_type: Mime,
-	progress_mutex: &Arc<Mutex<Progress>>) -> io::Result<()> {
-
-	if let (Some(ssize), Some(dsize)) = (src.size, dest.size) {
-		if !from_drive && ssize > dsize {
-			return Err(io::Error::other("File too large (os error 27)"));
-		}
-	}
-
-	let mut srcfile = File::open(&src.path)?;
-	let mut destfile = OpenOptions::new()
-		.create(true).write(true).truncate(true)
-		.custom_flags(libc::O_DSYNC).open(&dest.path)?;
-
-	let (a, ae) = match from_drive {
-		false => libarchive_open_for_reading(src)?,
-		true => libarchive_open_for_writing(dest, image_mime_type.clone())?,
+	let file: Box<dyn Read> = match vol.compression {
+		Compression::None => Box::new(file),
+		Compression::Gzip => Box::new(flate2::read::GzDecoder::new(file)),
+		Compression::Bzip2 => Box::new(bzip2::read::BzDecoder::new(file)),
+		Compression::Xz => Box::new(xz2::read::XzDecoder::new(file)),
+		Compression::Zstd => Box::new(zstd::stream::read::Decoder::new(file)?),
 	};
 
-	let mut buffer = [0; BLOCK_SIZE];
-	let buffer_ptr = buffer.as_mut_ptr() as *mut c_void;
+	Ok(file)
+}
 
+fn open_for_writing(vol: &Volume) -> io::Result<Box<dyn Write>> {
+	let mut options = OpenOptions::new();
+	let mut options = options.create(true).write(true).truncate(true);
+	if vol.vtype == VolumeType::Drive {
+		options = options.custom_flags(libc::O_DSYNC)
+	}
+	let file = options.open(&vol.path)?;
+
+	let file: Box<dyn Write> = match vol.compression {
+		Compression::None => Box::new(file),
+		Compression::Gzip => Box::new(
+			flate2::write::GzEncoder::new(file,
+			flate2::Compression::default())),
+		Compression::Bzip2 => Box::new(
+			bzip2::write::BzEncoder::new(file,
+			bzip2::Compression::default())),
+		Compression::Xz => Box::new(
+			xz2::write::XzEncoder::new(file, 3)),
+		Compression::Zstd => Box::new(
+			zstd::stream::write::Encoder::new(file,
+			zstd::DEFAULT_COMPRESSION_LEVEL)?.auto_finish()),
+	};
+
+	Ok(file)
+}
+
+pub fn copy(src: &Volume, dest: &Volume, progress_mutex: &ProgressMutex) -> io::Result<()> {
+	if src.vtype == VolumeType::Image
+		&& src.size.is_some() && dest.size.is_some()
+		&& src.size > dest.size {
+
+		return Err(io::Error::other("File too large (os error 27)"));
+	}
+
+	let mut srcfile = open_for_reading(src)?;
+	let mut destfile = open_for_writing(dest)?;
+	let mut buffer = [0u8; BLOCK_SIZE];
 	let timer = Instant::now();
 
 	loop {
-		let len = match from_drive {
-			false => unsafe {
-				archive_read_data(a, buffer_ptr, BLOCK_SIZE)
-			},
-			true => srcfile.read(&mut buffer)? as isize,
-		};
-		if len <= 0 {
+		let len = srcfile.read(&mut buffer)?;
+		if len == 0 {
 			break;
 		}
 
-		if from_drive && image_mime_type != mime::APPLICATION_OCTET_STREAM {
-			unsafe {
-				archive_write_data(a, buffer_ptr, len as usize);
-			}
-		} else {
-			destfile.write_all(&buffer[..(len as usize)])?;
-		}
+		destfile.write_all(&buffer[..len])?;
 
 		let mut progress = progress_mutex.lock().unwrap();
 		progress.done += len as u64;
 	}
-
-	match from_drive {
-		false => libarchive_close_for_reading(a),
-		true => libarchive_close_for_writing(a, ae),
-	};
 
 	let mut progress = progress_mutex.lock().unwrap();
 	progress.secs = timer.elapsed().as_secs();
@@ -210,56 +165,40 @@ pub fn copy(src: &Path, dest: &Path, from_drive: bool, image_mime_type: Mime,
 	Ok(())
 }
 
-pub fn verify(src: &Path, dest: &Path, from_drive: bool,
-	progress_mutex: &Arc<Mutex<Progress>>) -> io::Result<()> {
+pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex) -> io::Result<()> {
+	let mut image_file = open_for_reading(image)?;
+	let mut drive_file = OpenOptions::new()
+		.read(true).custom_flags(libc::O_DIRECT).open(&drive.path)?;
 
-	let mut srcfile = File::open(&src.path)?;
-	let mut destfile = OpenOptions::new().read(true)
-		.custom_flags(libc::O_DIRECT).open(&dest.path)?;
-
-	let (a, _ae) = match from_drive {
-		false => libarchive_open_for_reading(src)?,
-		true => libarchive_open_for_reading(dest)?,
+	let mut image_buffer = [0u8; BLOCK_SIZE];
+	let drive_buffer_ptr = unsafe {
+		alloc(Layout::from_size_align(BLOCK_SIZE, 4096).unwrap())
 	};
-
-	let mut srcbuffer = [0; BLOCK_SIZE];
-	let srcbuffer_ptr = srcbuffer.as_mut_ptr() as *mut c_void;
-	let destbuffer_ptr = unsafe {
-		alloc(Layout::from_size_align(BLOCK_SIZE, BLOCK_SIZE).unwrap())
-	};
-	let destbuffer = unsafe {
-		std::slice::from_raw_parts_mut(destbuffer_ptr, BLOCK_SIZE)
+	let drive_buffer = unsafe {
+		std::slice::from_raw_parts_mut(drive_buffer_ptr, BLOCK_SIZE)
 	};
 
 	let timer = Instant::now();
 
 	loop {
-		let len = match from_drive {
-			false => unsafe {
-				archive_read_data(a, srcbuffer_ptr, BLOCK_SIZE)
-			},
-			true => srcfile.read(&mut srcbuffer)? as isize,
+		let len = match image_file.read_exact(&mut image_buffer) {
+			Ok(_) => BLOCK_SIZE,
+			Err(_) => image_file.read(&mut image_buffer)?,
 		};
-		if len <= 0 {
+
+		if len == 0 {
 			break;
 		}
 
-		match from_drive {
-			false => destfile.read(destbuffer)? as isize,
-			true => unsafe {
-				archive_read_data(a, destbuffer_ptr as *mut c_void, BLOCK_SIZE)
-			},
-		};
+		let _ = drive_file.read(drive_buffer)?;
 
-		if srcbuffer[..len as usize] != destbuffer[..len as usize] {
+		if image_buffer[..len] != drive_buffer[..len] {
 			return Err(io::Error::other("Verification failed"));
 		}
 
 		let mut progress = progress_mutex.lock().unwrap();
 		progress.done += len as u64;
 	}
-
-	libarchive_close_for_reading(a);
 
 	let mut progress = progress_mutex.lock().unwrap();
 	progress.secs += timer.elapsed().as_secs();
