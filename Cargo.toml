@@ -11,11 +11,11 @@ categories = ["command-line-utilities", "filesystem", "hardware-support"]
 
 [dependencies]
 argh = "0.1"
-bzip2 = "0.4"
+bzip2 = "0.5"
 crossterm = "0.28"
 derivative = "2"
 drives = "0.6"
-flate2 = { version="1", features=["zlib-ng"], default-features=false }
+flate2 = { version = "1", features = ["zlib-ng"], default-features=false }
 libc = "0.2"
 num-format = { version = "0.4", features = ["with-system-locale"] }
 ratatui = "0.29"
