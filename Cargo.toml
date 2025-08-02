@@ -10,7 +10,7 @@ keywords = ["cli", "filesystem", "linux", "tool", "tui"]
 categories = ["command-line-utilities", "filesystem", "hardware-support"]
 
 [dependencies]
-argh = "0.1"
+argp = "0.4"
 bzip2 = "0.5"
 crossterm = "0.28"
 derivative = "2"

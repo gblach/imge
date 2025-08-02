@@ -5,7 +5,7 @@
 mod imge;
 mod mainloop;
 
-use argh::FromArgs;
+use argp::FromArgs;
 use crossterm::terminal;
 use mainloop::Mainloop;
 use std::ffi::OsString;
@@ -17,23 +17,23 @@ use std::path::Path;
 /// Write disk images to physical drive or vice versa.
 struct Args {
 	/// show all drives
-	#[argh(switch, short='a')]
+	#[argp(switch, short='a')]
 	all_drives: bool,
 
 	/// use this drive, do not ask
-	#[argh(option, short='d')]
+	#[argp(option, short='d')]
 	drive: Option<OsString>,
 
 	/// copy drive to image (instead of image to drive)
-	#[argh(switch, short='f')]
+	#[argp(switch, short='f')]
 	from_drive: bool,
 
 	/// verify if data was copied correctly
-	#[argh(switch, short='v')]
+	#[argp(switch, short='v')]
 	verify: bool,
 
 	/// path to image
-	#[argh(positional)]
+	#[argp(positional)]
 	image: OsString,
 }
 
@@ -50,16 +50,16 @@ fn terminal_raw_mode(raw_mode: bool) -> io::Result<()> {
 }
 
 fn main() -> io::Result<()> {
-	let args: Args = argh::from_env();
+	let args: Args = argp::parse_args_or_exit(argp::DEFAULT);
 
 	if args.from_drive {
 		let path = Path::new(&args.image);
 		let dirname = path.parent().unwrap().to_string_lossy();
 		let filename = path.file_name().unwrap().to_string_lossy();
 		let write_test = if dirname.is_empty() {
-			format!(".{}.imge", filename)
+			format!(".{filename}.imge")
 		} else {
-			format!("{}/.{}.imge", dirname, filename)
+			format!("{dirname}/.{filename}.imge")
 		};
 		File::create(&write_test)?;
 		remove_file(&write_test)?;
