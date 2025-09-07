@@ -5,6 +5,7 @@
 mod imge;
 mod mainloop;
 
+use anyhow::Result;
 use argp::FromArgs;
 use crossterm::terminal;
 use mainloop::Mainloop;
@@ -37,7 +38,7 @@ struct Args {
     image: OsString,
 }
 
-fn terminal_raw_mode(raw_mode: bool) -> io::Result<()> {
+fn terminal_raw_mode(raw_mode: bool) -> Result<()> {
     if raw_mode {
         crossterm::execute!(io::stdout(), terminal::EnterAlternateScreen)?;
         terminal::enable_raw_mode()?;
@@ -49,7 +50,7 @@ fn terminal_raw_mode(raw_mode: bool) -> io::Result<()> {
     Ok(())
 }
 
-fn main() -> io::Result<()> {
+fn main() -> Result<()> {
     let args: Args = argp::parse_args_or_exit(argp::DEFAULT);
 
     if args.from_drive {

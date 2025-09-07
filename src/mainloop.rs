@@ -4,6 +4,7 @@
 
 use crate::imge;
 use crate::Args;
+use anyhow::{Error, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use derivative::Derivative;
 use num_format::{SystemLocale, ToFormattedString};
@@ -41,7 +42,7 @@ pub struct Mainloop {
     selected_size: u64,
     modal: Modal,
     progress: Option<imge::ProgressMutex>,
-    error: Arc<Mutex<Option<io::Error>>>,
+    error: Arc<Mutex<Option<Error>>>,
     exit: bool,
 }
 
@@ -82,10 +83,10 @@ impl Mainloop {
         }
     }
 
-    pub fn run(&mut self) -> io::Result<()> {
+    pub fn run(&mut self) -> Result<()> {
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
 
-        self.update_drives(true);
+        self.update_drives(true)?;
 
         if self.args.drive.is_some() {
             self.start_copying();
@@ -98,7 +99,7 @@ impl Mainloop {
                 && progress.lock().unwrap().finished
             {
                 if self.args.verify && self.modal == Modal::Copying {
-                    self.start_verifying();
+                    self.start_verifying()?;
                 } else if self.args.drive.is_none() {
                     self.modal = Modal::Victory;
                 } else {
@@ -112,7 +113,7 @@ impl Mainloop {
                 match self.modal {
                     Modal::Keybindings => self.render_keybindings(frame),
                     Modal::Warning => self.render_warning(frame),
-                    Modal::Copying => self.render_copying(frame),
+                    Modal::Copying => self.render_copying(frame).unwrap(),
                     Modal::Verifying => self.render_verifying(frame),
                     Modal::Victory => self.render_victory(frame),
                     Modal::Error => self.render_error(frame),
@@ -124,7 +125,7 @@ impl Mainloop {
                 && let Event::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
             {
-                self.handle_events(key);
+                self.handle_events(key)?;
             }
         }
 
@@ -321,7 +322,7 @@ impl Mainloop {
         self.render_modal(frame, " Warning ", lines);
     }
 
-    fn render_copying(&self, frame: &mut Frame) {
+    fn render_copying(&self, frame: &mut Frame) -> Result<()> {
         let progress = self.progress.as_ref().unwrap().lock().unwrap();
         let area = Rect::new(1, (frame.area().height - 5) / 2, frame.area().width - 2, 5);
 
@@ -343,7 +344,7 @@ impl Mainloop {
 
             frame.render_widget(gauge, area);
         } else {
-            let locale = SystemLocale::default().unwrap();
+            let locale = SystemLocale::default()?;
             let copied_bytes = format!(
                 " {} bytes copied ",
                 progress.done.to_formatted_string(&locale)
@@ -358,6 +359,8 @@ impl Mainloop {
 
             self.render_modal(frame, " Copying ", lines);
         }
+
+        Ok(())
     }
 
     fn render_verifying(&self, frame: &mut Frame) {
@@ -432,7 +435,7 @@ impl Mainloop {
         self.render_modal(frame, " Error ", lines);
     }
 
-    fn handle_events(&mut self, key: KeyEvent) {
+    fn handle_events(&mut self, key: KeyEvent) -> Result<()> {
         if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
             self.exit = true;
         } else if key.code == KeyCode::Char('i') {
@@ -447,21 +450,21 @@ impl Mainloop {
             match key.code {
                 KeyCode::Char('a') => {
                     self.args.all_drives = !self.args.all_drives;
-                    self.update_drives(true);
+                    self.update_drives(true)?;
                 }
                 KeyCode::Char('r') => {
-                    self.update_drives(true);
+                    self.update_drives(true)?;
                 }
                 KeyCode::Up => {
                     if self.selected_row > 0 {
                         self.selected_row -= 1;
-                        self.update_drives(false);
+                        self.update_drives(false)?;
                     }
                 }
                 KeyCode::Down => {
                     if self.selected_row + 1 < self.drives.len() {
                         self.selected_row += 1;
-                        self.update_drives(false);
+                        self.update_drives(false)?;
                     }
                 }
                 KeyCode::Enter => {
@@ -479,11 +482,13 @@ impl Mainloop {
             self.progress = None;
             *self.error.lock().unwrap() = None;
         }
+
+        Ok(())
     }
 
-    fn update_drives(&mut self, refresh: bool) {
+    fn update_drives(&mut self, refresh: bool) -> Result<()> {
         if refresh {
-            self.drives = imge::list_drives(self.args.all_drives);
+            self.drives = imge::list_drives(self.args.all_drives)?;
             self.selected_row = 0;
 
             for i in 0..self.drives.len() {
@@ -500,13 +505,15 @@ impl Mainloop {
             if self.drives.is_empty() {
                 self.selected_drive = None;
                 self.selected_size = 0;
-                return;
+                return Ok(());
             }
         }
 
         self.selected_drive
             .clone_from(&Some(self.drives[self.selected_row].name.clone()));
         self.selected_size = self.drives[self.selected_row].size;
+
+        Ok(())
     }
 
     fn get_volumes(&self) -> (imge::Volume, imge::Volume) {
@@ -565,17 +572,13 @@ impl Mainloop {
         });
     }
 
-    fn start_verifying(&mut self) {
+    fn start_verifying(&mut self) -> Result<()> {
         let (image, drive) = self.get_volumes();
         let error = self.error.clone();
 
-        if fs::metadata(&image.path)
-            .unwrap()
-            .file_type()
-            .is_char_device()
-        {
+        if fs::metadata(&image.path)?.file_type().is_char_device() {
             self.modal = Modal::Victory;
-            return;
+            return Ok(());
         }
 
         let copying_progress = self.progress.as_ref().unwrap().lock().unwrap();
@@ -599,5 +602,7 @@ impl Mainloop {
                 *error.lock().unwrap() = Some(err);
             }
         });
+
+        Ok(())
     }
 }

@@ -2,6 +2,7 @@
 //  License, v. 2.0. If a copy of the MPL was not distributed with this
 //  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+use anyhow::{anyhow, Result};
 use std::alloc::{alloc, Layout};
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
@@ -64,10 +65,10 @@ impl Progress {
 
 pub type ProgressMutex = Arc<Mutex<Progress>>;
 
-pub fn list_drives(all_drives: bool) -> Vec<Drive> {
+pub fn list_drives(all_drives: bool) -> Result<Vec<Drive>> {
     let mut drives = Vec::new();
 
-    for device in drives::get_devices().unwrap() {
+    for device in drives::get_devices()? {
         let mut is_mounted = false;
 
         for partition in device.partitions {
@@ -90,10 +91,10 @@ pub fn list_drives(all_drives: bool) -> Vec<Drive> {
     }
 
     drives.sort_by(|a, b| a.name.cmp(&b.name));
-    drives
+    Ok(drives)
 }
 
-fn open_for_reading(vol: &Volume) -> io::Result<Box<dyn Read>> {
+fn open_for_reading(vol: &Volume) -> Result<Box<dyn Read>> {
     let file = File::open(&vol.path)?;
 
     let file: Box<dyn Read> = match vol.compression {
@@ -107,7 +108,7 @@ fn open_for_reading(vol: &Volume) -> io::Result<Box<dyn Read>> {
     Ok(file)
 }
 
-fn open_for_writing(vol: &Volume) -> io::Result<Box<dyn Write>> {
+fn open_for_writing(vol: &Volume) -> Result<Box<dyn Write>> {
     let mut options = OpenOptions::new();
     let mut options = options.create(true).write(true).truncate(true);
     if vol.vtype == VolumeType::Drive {
@@ -134,13 +135,13 @@ fn open_for_writing(vol: &Volume) -> io::Result<Box<dyn Write>> {
     Ok(file)
 }
 
-pub fn copy(src: &Volume, dest: &Volume, progress_mutex: &ProgressMutex) -> io::Result<()> {
+pub fn copy(src: &Volume, dest: &Volume, progress_mutex: &ProgressMutex) -> Result<()> {
     if src.vtype == VolumeType::Image
         && src.size.is_some()
         && dest.size.is_some()
         && src.size > dest.size
     {
-        return Err(io::Error::other("File too large (os error 27)"));
+        return Err(anyhow!(io::Error::other("File too large (os error 27)")));
     }
 
     let mut srcfile = open_for_reading(src)?;
@@ -171,7 +172,7 @@ pub fn copy(src: &Volume, dest: &Volume, progress_mutex: &ProgressMutex) -> io::
     Ok(())
 }
 
-pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex) -> io::Result<()> {
+pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex) -> Result<()> {
     let mut image_file = open_for_reading(image)?;
     let mut drive_file = OpenOptions::new()
         .read(true)
@@ -179,7 +180,7 @@ pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex) ->
         .open(&drive.path)?;
 
     let mut image_buffer = [0u8; BLOCK_SIZE];
-    let drive_buffer_ptr = unsafe { alloc(Layout::from_size_align(BLOCK_SIZE, 4096).unwrap()) };
+    let drive_buffer_ptr = unsafe { alloc(Layout::from_size_align(BLOCK_SIZE, 4096)?) };
     let drive_buffer = unsafe { std::slice::from_raw_parts_mut(drive_buffer_ptr, BLOCK_SIZE) };
 
     let timer = Instant::now();
@@ -197,7 +198,7 @@ pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex) ->
         let _ = drive_file.read(drive_buffer)?;
 
         if image_buffer[..len] != drive_buffer[..len] {
-            return Err(io::Error::other("Verification failed"));
+            return Err(anyhow!(io::Error::other("Verification failed")));
         }
 
         let mut progress = progress_mutex.lock().unwrap();
