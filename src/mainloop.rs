@@ -9,8 +9,9 @@ use derivative::Derivative;
 use num_format::{SystemLocale, ToFormattedString};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
+use std::{fs, io};
 use std::ffi::OsString;
-use std::io;
+use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -87,15 +88,14 @@ impl Mainloop {
 				self.modal = Modal::Error;
 			}
 
-			else if let Some(progress) = &self.progress {
-				if progress.lock().unwrap().finished {
-					if self.args.verify && self.modal == Modal::Copying {
-						self.start_verifying();
-					} else if self.args.drive.is_none() {
-						self.modal = Modal::Victory;
-					} else {
-						self.exit = true;
-					}
+			else if let Some(progress) = &self.progress
+			&& progress.lock().unwrap().finished {
+				if self.args.verify && self.modal == Modal::Copying {
+					self.start_verifying();
+				} else if self.args.drive.is_none() {
+					self.modal = Modal::Victory;
+				} else {
+					self.exit = true;
 				}
 			}
 
@@ -113,12 +113,10 @@ impl Mainloop {
 				}
 			})?;
 
-			if event::poll(std::time::Duration::from_millis(100))? {
-				if let Event::Key(key) = event::read()? {
-					if key.kind == KeyEventKind::Press {
-						self.handle_events(key);
-					}
-				}
+			if event::poll(std::time::Duration::from_millis(100))?
+			&& let Event::Key(key) = event::read()?
+			&& key.kind == KeyEventKind::Press {
+				self.handle_events(key);
 			}
 		}
 
@@ -510,8 +508,12 @@ impl Mainloop {
 			vtype: imge::VolumeType::Image,
 			path: self.args.image.clone(),
 			size: if self.image_compression == imge::Compression::None {
-				match std::fs::metadata(&self.args.image) {
-					Ok(metadata) => Some(metadata.len()),
+				match fs::metadata(&self.args.image) {
+					Ok(metadata) => if metadata.file_type().is_char_device() {
+						Some(self.selected_size)
+					} else {
+						Some(metadata.len())
+					},
 					Err(_) => None,
 				}
 			} else {
@@ -558,6 +560,11 @@ impl Mainloop {
 	fn start_verifying(&mut self) {
 		let (image, drive) = self.get_volumes();
 		let error = self.error.clone();
+
+		if fs::metadata(&image.path).unwrap().file_type().is_char_device() {
+			self.modal = Modal::Victory;
+			return;
+		}
 
 		let copying_progress = self.progress.as_ref().unwrap().lock().unwrap();
 		let progress = Arc::new(Mutex::new(imge::Progress {

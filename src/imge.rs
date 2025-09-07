@@ -156,6 +156,10 @@ pub fn copy(src: &Volume, dest: &Volume, progress_mutex: &ProgressMutex) -> io::
 
 		let mut progress = progress_mutex.lock().unwrap();
 		progress.done += len as u64;
+
+		if progress.size > 0 && progress.size == progress.done {
+			break;
+		}
 	}
 
 	let mut progress = progress_mutex.lock().unwrap();
