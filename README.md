@@ -47,8 +47,3 @@ since choosing the wrong disk may have a big impact on the data on your hard dri
 ![copying](https://raw.githubusercontent.com/gblach/imge/e9ac4a0/screenshots/4-copying.avif)
 ![verifying](https://raw.githubusercontent.com/gblach/imge/e9ac4a0/screenshots/5-verifying.avif)
 ![victory](https://raw.githubusercontent.com/gblach/imge/e9ac4a0/screenshots/6-victory.avif)
-
-## TODO
-
-- Verify checksum before making copy.
-- Support copying /dev/zero and /dev/urandom to the drive.
