@@ -192,7 +192,11 @@ impl Mainloop {
             let size = imge::humanize(drive.size);
             row.push(Cell::from(Text::from(size).right_aligned()));
 
-            rows.push(Row::new(row));
+            let mut row = Row::new(row);
+            if Some(&drive.name) == self.selected_drive.as_ref() {
+                row = row.style(Style::new().bg(Color::Rgb(40, 40, 40)));
+            }
+            rows.push(row);
         }
 
         let mut widths: Vec<Constraint> = Vec::with_capacity(self.drives.len());
