@@ -3,7 +3,7 @@
 //  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use anyhow::{anyhow, Result};
-use std::alloc::{alloc, Layout};
+use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -172,6 +172,36 @@ pub fn copy(src: &Volume, dest: &Volume, progress_mutex: &ProgressMutex) -> Resu
     Ok(())
 }
 
+struct AlignedBuf {
+    ptr: *mut u8,
+    layout: Layout,
+}
+
+impl AlignedBuf {
+    fn new(size: usize, align: usize) -> Result<Self> {
+        let layout = Layout::from_size_align(size, align)?;
+        let ptr = unsafe { alloc(layout) };
+        if ptr.is_null() {
+            return Err(anyhow!("failed to allocate aligned buffer"));
+        }
+        Ok(Self { ptr, layout })
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.layout.size()) }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.layout.size()) }
+    }
+}
+
+impl Drop for AlignedBuf {
+    fn drop(&mut self) {
+        unsafe { dealloc(self.ptr, self.layout) };
+    }
+}
+
 pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex) -> Result<()> {
     let mut image_file = open_for_reading(image)?;
     let mut drive_file = OpenOptions::new()
@@ -180,8 +210,7 @@ pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex) ->
         .open(&drive.path)?;
 
     let mut image_buffer = [0u8; BLOCK_SIZE];
-    let drive_buffer_ptr = unsafe { alloc(Layout::from_size_align(BLOCK_SIZE, 4096)?) };
-    let drive_buffer = unsafe { std::slice::from_raw_parts_mut(drive_buffer_ptr, BLOCK_SIZE) };
+    let mut drive_buf = AlignedBuf::new(BLOCK_SIZE, 4096)?;
 
     let timer = Instant::now();
 
@@ -195,9 +224,9 @@ pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex) ->
             break;
         }
 
-        let _ = drive_file.read(drive_buffer)?;
+        let _ = drive_file.read(drive_buf.as_mut_slice())?;
 
-        if image_buffer[..len] != drive_buffer[..len] {
+        if image_buffer[..len] != drive_buf.as_slice()[..len] {
             return Err(anyhow!(io::Error::other("Verification failed")));
         }
 
