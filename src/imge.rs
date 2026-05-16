@@ -2,8 +2,8 @@
 //  License, v. 2.0. If a copy of the MPL was not distributed with this
 //  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use anyhow::{anyhow, Result};
-use std::alloc::{alloc, dealloc, Layout};
+use anyhow::{Result, anyhow};
+use std::alloc::{Layout, alloc, dealloc};
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};

@@ -2,8 +2,8 @@
 //  License, v. 2.0. If a copy of the MPL was not distributed with this
 //  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use crate::imge;
 use crate::Args;
+use crate::imge;
 use anyhow::{Error, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use derivative::Derivative;
@@ -388,11 +388,10 @@ impl Mainloop {
     fn render_victory(&self, frame: &mut Frame) {
         let progress = self.progress.as_ref().unwrap().lock().unwrap();
 
-        let speed = if progress.secs > 0 {
-            progress.done / progress.secs
-        } else {
-            progress.done
-        };
+        let speed = progress
+            .done
+            .checked_div(progress.secs)
+            .unwrap_or(progress.done);
 
         let lines = vec![
             Line::from(""),
@@ -455,22 +454,16 @@ impl Mainloop {
                 KeyCode::Char('r') => {
                     self.update_drives(true)?;
                 }
-                KeyCode::Up => {
-                    if self.selected_row > 0 {
-                        self.selected_row -= 1;
-                        self.update_drives(false)?;
-                    }
+                KeyCode::Up if self.selected_row > 0 => {
+                    self.selected_row -= 1;
+                    self.update_drives(false)?;
                 }
-                KeyCode::Down => {
-                    if self.selected_row + 1 < self.drives.len() {
-                        self.selected_row += 1;
-                        self.update_drives(false)?;
-                    }
+                KeyCode::Down if self.selected_row + 1 < self.drives.len() => {
+                    self.selected_row += 1;
+                    self.update_drives(false)?;
                 }
-                KeyCode::Enter => {
-                    if self.selected_drive.is_some() {
-                        self.modal = Modal::Warning;
-                    }
+                KeyCode::Enter if self.selected_drive.is_some() => {
+                    self.modal = Modal::Warning;
                 }
                 KeyCode::Esc => {
                     self.exit = true;

@@ -10,7 +10,7 @@ use argp::FromArgs;
 use crossterm::terminal;
 use mainloop::Mainloop;
 use std::ffi::OsString;
-use std::fs::{remove_file, File};
+use std::fs::{File, remove_file};
 use std::io;
 use std::path::Path;
 
