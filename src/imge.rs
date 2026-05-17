@@ -8,6 +8,7 @@ use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -135,7 +136,7 @@ fn open_for_writing(vol: &Volume) -> Result<Box<dyn Write>> {
     Ok(file)
 }
 
-pub fn copy(src: &Volume, dest: &Volume, progress_mutex: &ProgressMutex) -> Result<()> {
+pub fn copy(src: &Volume, dest: &Volume, progress_mutex: &ProgressMutex, cancelled: &Arc<AtomicBool>) -> Result<()> {
     if src.vtype == VolumeType::Image
         && src.size.is_some()
         && dest.size.is_some()
@@ -150,6 +151,10 @@ pub fn copy(src: &Volume, dest: &Volume, progress_mutex: &ProgressMutex) -> Resu
     let timer = Instant::now();
 
     loop {
+        if cancelled.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
         let len = srcfile.read(&mut buffer)?;
         if len == 0 {
             break;
@@ -202,7 +207,7 @@ impl Drop for AlignedBuf {
     }
 }
 
-pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex) -> Result<()> {
+pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex, cancelled: &Arc<AtomicBool>) -> Result<()> {
     let mut image_file = open_for_reading(image)?;
     let mut drive_file = OpenOptions::new()
         .read(true)
@@ -215,6 +220,10 @@ pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex) ->
     let timer = Instant::now();
 
     loop {
+        if cancelled.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
         let len = match image_file.read_exact(&mut image_buffer) {
             Ok(_) => BLOCK_SIZE,
             Err(_) => image_file.read(&mut image_buffer)?,

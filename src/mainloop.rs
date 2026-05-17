@@ -13,6 +13,7 @@ use ratatui::widgets::*;
 use std::ffi::OsString;
 use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::{fs, io};
@@ -43,6 +44,7 @@ pub struct Mainloop {
     modal: Modal,
     progress: Option<imge::ProgressMutex>,
     error: Arc<Mutex<Option<Error>>>,
+    cancel: Arc<AtomicBool>,
     exit: bool,
 }
 
@@ -475,6 +477,7 @@ impl Mainloop {
                 _ => {}
             }
         } else if key.code == KeyCode::Esc {
+            self.cancel.store(true, Ordering::Relaxed);
             self.modal = Modal::None;
             self.progress = None;
             *self.error.lock().unwrap() = None;
@@ -547,6 +550,8 @@ impl Mainloop {
     fn start_copying(&mut self) {
         let (image, drive) = self.get_volumes();
         let error = self.error.clone();
+        self.cancel.store(false, Ordering::Relaxed);
+        let cancel = self.cancel.clone();
 
         let (src, dest) = match self.args.from_drive {
             false => (image, drive),
@@ -562,7 +567,7 @@ impl Mainloop {
         self.modal = Modal::Copying;
 
         thread::spawn(move || {
-            let result = imge::copy(&src, &dest, &progress);
+            let result = imge::copy(&src, &dest, &progress, &cancel);
             if let Err(err) = result {
                 *error.lock().unwrap() = Some(err);
             }
@@ -572,6 +577,8 @@ impl Mainloop {
     fn start_verifying(&mut self) -> Result<()> {
         let (image, drive) = self.get_volumes();
         let error = self.error.clone();
+        self.cancel.store(false, Ordering::Relaxed);
+        let cancel = self.cancel.clone();
 
         if fs::metadata(&image.path)?.file_type().is_char_device() {
             self.modal = Modal::Victory;
@@ -594,7 +601,7 @@ impl Mainloop {
         self.modal = Modal::Verifying;
 
         thread::spawn(move || {
-            let result = imge::verify(&image, &drive, &progress);
+            let result = imge::verify(&image, &drive, &progress, &cancel);
             if let Err(err) = result {
                 *error.lock().unwrap() = Some(err);
             }
