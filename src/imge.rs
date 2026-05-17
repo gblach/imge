@@ -224,10 +224,7 @@ pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex, ca
             return Ok(());
         }
 
-        let len = match image_file.read_exact(&mut image_buffer) {
-            Ok(_) => BLOCK_SIZE,
-            Err(_) => image_file.read(&mut image_buffer)?,
-        };
+        let len = image_file.read(&mut image_buffer)?;
 
         if len == 0 {
             break;
