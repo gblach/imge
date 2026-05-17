@@ -142,7 +142,7 @@ pub fn copy(src: &Volume, dest: &Volume, progress_mutex: &ProgressMutex, cancell
         && dest.size.is_some()
         && src.size > dest.size
     {
-        return Err(anyhow!(io::Error::other("File too large (os error 27)")));
+        return Err(anyhow!(io::Error::from_raw_os_error(libc::EFBIG)));
     }
 
     let mut srcfile = open_for_reading(src)?;
