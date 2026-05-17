@@ -70,7 +70,7 @@ fn main() -> Result<()> {
 
     terminal_raw_mode(true)?;
     scopeguard::defer! { let _ = terminal_raw_mode(false); }
-    Mainloop::new(args).run()?;
+    Mainloop::new(args)?.run()?;
 
     Ok(())
 }

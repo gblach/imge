@@ -6,7 +6,6 @@ use crate::Args;
 use crate::imge;
 use anyhow::{Error, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use derivative::Derivative;
 use num_format::{SystemLocale, ToFormattedString};
 use ratatui::prelude::*;
 use ratatui::widgets::*;
@@ -30,13 +29,12 @@ enum Modal {
     Error,
 }
 
-#[derive(Derivative)]
-#[derivative(Default)]
 pub struct Mainloop {
     args: Args,
     ui_accent: Style,
     image_basename: String,
     image_compression: imge::Compression,
+    locale: SystemLocale,
     drives: Vec<imge::Drive>,
     selected_row: usize,
     selected_drive: Option<OsString>,
@@ -49,7 +47,7 @@ pub struct Mainloop {
 }
 
 impl Mainloop {
-    pub fn new(args: Args) -> Self {
+    pub fn new(args: Args) -> Result<Self> {
         let ui_accent = match args.from_drive {
             false => Style::new().magenta(),
             true => Style::new().yellow(),
@@ -75,14 +73,22 @@ impl Mainloop {
             _ => imge::Compression::None,
         };
 
-        Self {
+        Ok(Self {
             args: args.clone(),
             ui_accent,
             image_basename,
             image_compression,
+            locale: SystemLocale::default()?,
+            drives: vec![],
+            selected_row: 0,
             selected_drive: args.drive,
-            ..Default::default()
-        }
+            selected_size: 0,
+            modal: Modal::None,
+            progress: None,
+            error: Arc::new(Mutex::new(None)),
+            cancel: Arc::new(AtomicBool::new(false)),
+            exit: false,
+        })
     }
 
     pub fn run(&mut self) -> Result<()> {
@@ -115,7 +121,7 @@ impl Mainloop {
                 match self.modal {
                     Modal::Keybindings => self.render_keybindings(frame),
                     Modal::Warning => self.render_warning(frame),
-                    Modal::Copying => self.render_copying(frame).unwrap(),
+                    Modal::Copying => self.render_copying(frame),
                     Modal::Verifying => self.render_verifying(frame),
                     Modal::Victory => self.render_victory(frame),
                     Modal::Error => self.render_error(frame),
@@ -328,7 +334,7 @@ impl Mainloop {
         self.render_modal(frame, " Warning ", lines);
     }
 
-    fn render_copying(&self, frame: &mut Frame) -> Result<()> {
+    fn render_copying(&self, frame: &mut Frame) {
         let progress = self.progress.as_ref().unwrap().lock().unwrap();
         let area = Rect::new(1, (frame.area().height - 5) / 2, frame.area().width - 2, 5);
 
@@ -350,10 +356,9 @@ impl Mainloop {
 
             frame.render_widget(gauge, area);
         } else {
-            let locale = SystemLocale::default()?;
             let copied_bytes = format!(
                 " {} bytes copied ",
-                progress.done.to_formatted_string(&locale)
+                progress.done.to_formatted_string(&self.locale)
             );
 
             let lines = vec![
@@ -365,8 +370,6 @@ impl Mainloop {
 
             self.render_modal(frame, " Copying ", lines);
         }
-
-        Ok(())
     }
 
     fn render_verifying(&self, frame: &mut Frame) {
