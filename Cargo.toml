@@ -1,6 +1,6 @@
 [package]
 name = "imge"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 description = "Write disk images to physical drive or vice versa."
 readme = "README.md"
