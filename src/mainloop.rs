@@ -437,7 +437,10 @@ impl Mainloop {
 
         lines.push(Line::from(""));
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled("<esc> ", self.ui_accent), "Close".into()]));
+        lines.push(Line::from(vec![
+            Span::styled("<esc> ", self.ui_accent),
+            "Close".into(),
+        ]));
 
         self.render_modal(frame, " Victory ", lines);
     }

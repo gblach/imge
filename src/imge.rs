@@ -137,7 +137,12 @@ fn open_for_writing(vol: &Volume) -> Result<Box<dyn Write>> {
     Ok(file)
 }
 
-pub fn copy(src: &Volume, dest: &Volume, progress_mutex: &ProgressMutex, cancelled: &Arc<AtomicBool>) -> Result<()> {
+pub fn copy(
+    src: &Volume,
+    dest: &Volume,
+    progress_mutex: &ProgressMutex,
+    cancelled: &Arc<AtomicBool>,
+) -> Result<()> {
     if src.vtype == VolumeType::Image
         && src.size.is_some()
         && dest.size.is_some()
@@ -208,7 +213,12 @@ impl Drop for AlignedBuf {
     }
 }
 
-pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex, cancelled: &Arc<AtomicBool>) -> Result<()> {
+pub fn verify(
+    image: &Volume,
+    drive: &Volume,
+    progress_mutex: &ProgressMutex,
+    cancelled: &Arc<AtomicBool>,
+) -> Result<()> {
     let mut image_file = open_for_reading(image)?;
     let mut drive_file = OpenOptions::new()
         .read(true)
