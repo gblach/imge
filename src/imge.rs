@@ -50,7 +50,8 @@ pub struct Volume {
 pub struct Progress {
     pub size: u64,
     pub done: u64,
-    pub secs: u64,
+    pub copy_secs: u64,
+    pub verify_secs: u64,
     pub finished: bool,
 }
 
@@ -171,7 +172,7 @@ pub fn copy(src: &Volume, dest: &Volume, progress_mutex: &ProgressMutex, cancell
     }
 
     let mut progress = progress_mutex.lock().unwrap();
-    progress.secs = timer.elapsed().as_secs();
+    progress.copy_secs = timer.elapsed().as_secs();
     progress.finished = true;
 
     Ok(())
@@ -241,7 +242,7 @@ pub fn verify(image: &Volume, drive: &Volume, progress_mutex: &ProgressMutex, ca
     }
 
     let mut progress = progress_mutex.lock().unwrap();
-    progress.secs += timer.elapsed().as_secs();
+    progress.verify_secs = timer.elapsed().as_secs();
     progress.finished = true;
 
     Ok(())

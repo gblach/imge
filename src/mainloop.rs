@@ -396,13 +396,10 @@ impl Mainloop {
 
     fn render_victory(&self, frame: &mut Frame) {
         let progress = self.progress.as_ref().unwrap().lock().unwrap();
+        let total_secs = progress.copy_secs + progress.verify_secs;
+        let copy_speed = progress.done.checked_div(progress.copy_secs).unwrap_or(0);
 
-        let speed = progress
-            .done
-            .checked_div(progress.secs)
-            .unwrap_or(progress.done);
-
-        let lines = vec![
+        let mut lines = vec![
             Line::from(""),
             Line::from(vec![
                 if !self.args.verify {
@@ -412,19 +409,35 @@ impl Mainloop {
                 },
                 Span::styled(imge::humanize(progress.done), self.ui_accent),
                 " in ".into(),
-                Span::styled(progress.secs.to_string(), self.ui_accent),
+                Span::styled(total_secs.to_string(), self.ui_accent),
                 " seconds.".into(),
             ]),
             Line::from(""),
-            Line::from(vec![
-                "An average of ".into(),
-                Span::styled(imge::humanize(speed), self.ui_accent),
-                " per second.".into(),
-            ]),
-            Line::from(""),
-            Line::from(""),
-            Line::from(vec![Span::styled("<esc> ", self.ui_accent), "Close".into()]),
         ];
+
+        if progress.verify_secs == 0 {
+            lines.push(Line::from(vec![
+                "An average of ".into(),
+                Span::styled(imge::humanize(copy_speed), self.ui_accent),
+                " per second.".into(),
+            ]));
+        } else {
+            let verify_speed = progress.done.checked_div(progress.verify_secs).unwrap_or(0);
+            lines.push(Line::from(vec![
+                "An average of ".into(),
+                Span::styled(imge::humanize(copy_speed), self.ui_accent),
+                " per second copying".into(),
+            ]));
+            lines.push(Line::from(vec![
+                "and ".into(),
+                Span::styled(imge::humanize(verify_speed), self.ui_accent),
+                " per second verifying.".into(),
+            ]));
+        }
+
+        lines.push(Line::from(""));
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled("<esc> ", self.ui_accent), "Close".into()]));
 
         self.render_modal(frame, " Victory ", lines);
     }
@@ -595,7 +608,7 @@ impl Mainloop {
             } else {
                 copying_progress.done
             },
-            secs: copying_progress.secs,
+            copy_secs: copying_progress.copy_secs,
             ..Default::default()
         }));
         drop(copying_progress);
