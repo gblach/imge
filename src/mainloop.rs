@@ -4,7 +4,7 @@
 
 use crate::Args;
 use crate::imge;
-use anyhow::{Error, Result};
+use anyhow::{Error, Result, anyhow};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use num_format::{SystemLocale, ToFormattedString};
 use ratatui::prelude::*;
@@ -96,7 +96,13 @@ impl Mainloop {
 
         self.update_drives(true)?;
 
-        if self.args.drive.is_some() {
+        if let Some(drive) = &self.args.drive {
+            if !self.drives.iter().any(|d| &d.name == drive) {
+                return Err(anyhow!(
+                    "drive {} not found (use -a to list non-removable drives)",
+                    drive.to_string_lossy()
+                ));
+            }
             self.start_copying();
         }
 
