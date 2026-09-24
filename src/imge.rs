@@ -110,7 +110,36 @@ fn open_for_reading(vol: &Volume) -> Result<Box<dyn Read>> {
     Ok(file)
 }
 
-fn open_for_writing(vol: &Volume) -> Result<Box<dyn Write>> {
+// Encoders write their trailer on drop and ignore errors there, so they must be finished
+// explicitly before the output is reported as complete.
+trait FinishWrite: Write {
+    fn finish(self: Box<Self>) -> io::Result<()>;
+}
+
+impl FinishWrite for File {
+    fn finish(self: Box<Self>) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+macro_rules! impl_finish_write {
+    ($($t:ty),*) => {$(
+        impl FinishWrite for $t {
+            fn finish(self: Box<Self>) -> io::Result<()> {
+                <$t>::finish(*self).map(drop)
+            }
+        }
+    )*};
+}
+
+impl_finish_write!(
+    flate2::write::GzEncoder<File>,
+    bzip2::write::BzEncoder<File>,
+    xz2::write::XzEncoder<File>,
+    zstd::stream::write::Encoder<'static, File>
+);
+
+fn open_for_writing(vol: &Volume) -> Result<Box<dyn FinishWrite>> {
     let mut options = OpenOptions::new();
     let mut options = options.create(true).write(true).truncate(true);
     if vol.vtype == VolumeType::Drive {
@@ -118,7 +147,7 @@ fn open_for_writing(vol: &Volume) -> Result<Box<dyn Write>> {
     }
     let file = options.open(&vol.path)?;
 
-    let file: Box<dyn Write> = match vol.compression {
+    let file: Box<dyn FinishWrite> = match vol.compression {
         Compression::None => Box::new(file),
         Compression::Gzip => Box::new(flate2::write::GzEncoder::new(
             file,
@@ -129,9 +158,10 @@ fn open_for_writing(vol: &Volume) -> Result<Box<dyn Write>> {
             bzip2::Compression::default(),
         )),
         Compression::Xz => Box::new(xz2::write::XzEncoder::new(file, 3)),
-        Compression::Zstd => Box::new(
-            zstd::stream::write::Encoder::new(file, zstd::DEFAULT_COMPRESSION_LEVEL)?.auto_finish(),
-        ),
+        Compression::Zstd => Box::new(zstd::stream::write::Encoder::new(
+            file,
+            zstd::DEFAULT_COMPRESSION_LEVEL,
+        )?),
     };
 
     Ok(file)
@@ -175,6 +205,8 @@ pub fn copy(
             break;
         }
     }
+
+    destfile.finish()?;
 
     let mut progress = progress_mutex.lock().unwrap();
     progress.copy_secs = timer.elapsed().as_secs();
