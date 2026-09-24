@@ -245,6 +245,20 @@ impl Drop for AlignedBuf {
     }
 }
 
+// Like read_exact, but a short count at EOF is returned instead of being an error.
+fn read_full(file: &mut dyn Read, buf: &mut [u8]) -> io::Result<usize> {
+    let mut total = 0;
+    while total < buf.len() {
+        match file.read(&mut buf[total..]) {
+            Ok(0) => break,
+            Ok(n) => total += n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(total)
+}
+
 pub fn verify(
     image: &Volume,
     drive: &Volume,
@@ -267,15 +281,15 @@ pub fn verify(
             return Ok(());
         }
 
-        let len = image_file.read(&mut image_buffer)?;
+        let len = read_full(&mut image_file, &mut image_buffer)?;
 
         if len == 0 {
             break;
         }
 
-        let _ = drive_file.read(drive_buf.as_mut_slice())?;
+        let drive_len = read_full(&mut drive_file, drive_buf.as_mut_slice())?;
 
-        if image_buffer[..len] != drive_buf.as_slice()[..len] {
+        if drive_len < len || image_buffer[..len] != drive_buf.as_slice()[..len] {
             return Err(anyhow!(io::Error::other("Verification failed")));
         }
 
