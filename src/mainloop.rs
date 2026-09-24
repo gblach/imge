@@ -108,7 +108,11 @@ impl Mainloop {
 
         while !self.exit {
             if self.error.lock().unwrap().is_some() {
-                self.modal = Modal::Error;
+                if self.args.drive.is_some() {
+                    self.exit = true;
+                } else {
+                    self.modal = Modal::Error;
+                }
             } else if let Some(progress) = &self.progress
                 && progress.lock().unwrap().finished
             {
@@ -141,6 +145,18 @@ impl Mainloop {
             {
                 self.handle_events(key)?;
             }
+        }
+
+        if let Some(err) = self.error.lock().unwrap().take() {
+            return Err(err);
+        }
+
+        let finished = self
+            .progress
+            .as_ref()
+            .is_some_and(|p| p.lock().unwrap().finished);
+        if self.args.drive.is_some() && !finished {
+            return Err(anyhow!("cancelled"));
         }
 
         Ok(())
@@ -503,6 +519,7 @@ impl Mainloop {
             }
         } else if key.code == KeyCode::Esc {
             self.cancel.store(true, Ordering::Relaxed);
+            self.exit = self.args.drive.is_some();
             self.modal = Modal::None;
             self.progress = None;
             *self.error.lock().unwrap() = None;
