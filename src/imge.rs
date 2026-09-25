@@ -60,7 +60,7 @@ impl Progress {
         if self.size == 0 {
             0.0
         } else {
-            self.done as f64 / self.size as f64
+            (self.done as f64 / self.size as f64).min(1.0)
         }
     }
 }
