@@ -5,12 +5,12 @@
 mod imge;
 mod mainloop;
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use argp::FromArgs;
 use crossterm::terminal;
 use mainloop::Mainloop;
 use std::ffi::OsString;
-use std::fs::{File, remove_file};
+use std::fs::{self, File, remove_file};
 use std::io;
 use std::path::Path;
 
@@ -53,10 +53,18 @@ fn terminal_raw_mode(raw_mode: bool) -> Result<()> {
 fn main() -> Result<()> {
     let args: Args = argp::parse_args_or_exit(argp::DEFAULT);
 
+    let path = Path::new(&args.image);
+    let filename = path
+        .file_name()
+        .with_context(|| format!("{} is not a file path", path.display()))?
+        .to_string_lossy();
+
+    if fs::metadata(path).is_ok_and(|m| m.is_dir()) {
+        bail!("{} is a directory", path.display());
+    }
+
     if args.from_drive {
-        let path = Path::new(&args.image);
-        let dirname = path.parent().unwrap().to_string_lossy();
-        let filename = path.file_name().unwrap().to_string_lossy();
+        let dirname = path.parent().unwrap_or(Path::new("")).to_string_lossy();
         let write_test = if dirname.is_empty() {
             format!(".{filename}.imge")
         } else {

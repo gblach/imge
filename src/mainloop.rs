@@ -4,7 +4,7 @@
 
 use crate::Args;
 use crate::imge;
-use anyhow::{Error, Result, anyhow};
+use anyhow::{Context, Error, Result, anyhow};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use num_format::{SystemLocale, ToFormattedString};
 use ratatui::prelude::*;
@@ -56,7 +56,7 @@ impl Mainloop {
         let image_path = Path::new(&args.image);
         let image_basename = image_path
             .file_name()
-            .unwrap()
+            .with_context(|| format!("{} is not a file path", image_path.display()))?
             .to_string_lossy()
             .to_string();
 
