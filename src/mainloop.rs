@@ -187,7 +187,12 @@ impl Mainloop {
                 Span::styled("<i>", self.ui_accent),
                 " to display keybindings.".into(),
             ]);
-            let area = Rect::new(0, frame.area().height - 1, frame.area().width, 1);
+            let area = Rect::new(
+                0,
+                frame.area().height.saturating_sub(1),
+                frame.area().width,
+                1,
+            );
             frame.render_widget(info, area);
         }
     }
@@ -251,7 +256,13 @@ impl Mainloop {
         let mut state = TableState::default();
         state.select(Some(self.selected_row));
 
-        let area = Rect::new(0, 3, frame.area().width, frame.area().height - 3);
+        let area = Rect::new(
+            0,
+            3,
+            frame.area().width,
+            frame.area().height.saturating_sub(3),
+        )
+        .intersection(frame.area());
         frame.render_stateful_widget(table, area, &mut state);
     }
 
@@ -269,8 +280,8 @@ impl Mainloop {
             .centered()
             .block(block);
 
-        let w = 72;
-        let h = 10;
+        let w = frame.area().width.min(72);
+        let h = frame.area().height.min(10);
         let x = (frame.area().width - w) / 2;
         let y = (frame.area().height - h) / 2;
         let area = Rect::new(x, y, w, h);
@@ -358,7 +369,13 @@ impl Mainloop {
 
     fn render_copying(&self, frame: &mut Frame) {
         let progress = self.progress.as_ref().unwrap().lock().unwrap();
-        let area = Rect::new(1, (frame.area().height - 5) / 2, frame.area().width - 2, 5);
+        let area = Rect::new(
+            1,
+            frame.area().height.saturating_sub(5) / 2,
+            frame.area().width.saturating_sub(2),
+            5,
+        )
+        .intersection(frame.area());
 
         if progress.size > 0 {
             let block = Block::default()
@@ -396,7 +413,13 @@ impl Mainloop {
 
     fn render_verifying(&self, frame: &mut Frame) {
         let progress = self.progress.as_ref().unwrap().lock().unwrap();
-        let area = Rect::new(1, (frame.area().height - 5) / 2, frame.area().width - 2, 5);
+        let area = Rect::new(
+            1,
+            frame.area().height.saturating_sub(5) / 2,
+            frame.area().width.saturating_sub(2),
+            5,
+        )
+        .intersection(frame.area());
 
         let block = Block::default()
             .title_top(" Verifying ")
