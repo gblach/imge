@@ -592,7 +592,7 @@ impl Mainloop {
     fn start_copying(&mut self) {
         let (image, drive) = self.get_volumes();
         let error = self.error.clone();
-        self.cancel.store(false, Ordering::Relaxed);
+        self.cancel = Arc::new(AtomicBool::new(false));
         let cancel = self.cancel.clone();
 
         let (src, dest) = match self.args.from_drive {
@@ -619,7 +619,7 @@ impl Mainloop {
     fn start_verifying(&mut self) -> Result<()> {
         let (image, drive) = self.get_volumes();
         let error = self.error.clone();
-        self.cancel.store(false, Ordering::Relaxed);
+        self.cancel = Arc::new(AtomicBool::new(false));
         let cancel = self.cancel.clone();
 
         if fs::metadata(&image.path)?.file_type().is_char_device() {
