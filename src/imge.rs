@@ -184,6 +184,8 @@ pub fn copy(
     let mut srcfile = open_for_reading(src)?;
     let mut destfile = open_for_writing(dest)?;
     let mut buffer = [0u8; BLOCK_SIZE];
+    let size = src.size.unwrap_or_default();
+    let mut done = 0;
     let timer = Instant::now();
 
     loop {
@@ -191,19 +193,24 @@ pub fn copy(
             return Ok(());
         }
 
-        let len = srcfile.read(&mut buffer)?;
+        // A char-device source never reaches EOF, so stop exactly at the known size.
+        let want = if size > 0 {
+            (size - done).min(BLOCK_SIZE as u64) as usize
+        } else {
+            BLOCK_SIZE
+        };
+        if want == 0 {
+            break;
+        }
+
+        let len = srcfile.read(&mut buffer[..want])?;
         if len == 0 {
             break;
         }
 
         destfile.write_all(&buffer[..len])?;
-
-        let mut progress = progress_mutex.lock().unwrap();
-        progress.done += len as u64;
-
-        if progress.size > 0 && progress.size == progress.done {
-            break;
-        }
+        done += len as u64;
+        progress_mutex.lock().unwrap().done = done;
     }
 
     destfile.finish()?;
