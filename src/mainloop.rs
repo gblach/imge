@@ -458,7 +458,14 @@ impl Mainloop {
     fn render_victory(&self, frame: &mut Frame) {
         let progress = self.progress.as_ref().unwrap().lock().unwrap();
         let total_secs = progress.copy_secs + progress.verify_secs;
-        let copy_speed = progress.done.checked_div(progress.copy_secs).unwrap_or(0);
+        let speed = |secs: f64| {
+            if secs > 0.0 {
+                (progress.done as f64 / secs) as u64
+            } else {
+                0
+            }
+        };
+        let copy_speed = speed(progress.copy_secs);
 
         let mut lines = vec![
             Line::from(""),
@@ -470,20 +477,20 @@ impl Mainloop {
                 },
                 Span::styled(imge::humanize(progress.done), self.ui_accent),
                 " in ".into(),
-                Span::styled(total_secs.to_string(), self.ui_accent),
+                Span::styled(format!("{total_secs:.1}"), self.ui_accent),
                 " seconds.".into(),
             ]),
             Line::from(""),
         ];
 
-        if progress.verify_secs == 0 {
+        if progress.verify_secs == 0.0 {
             lines.push(Line::from(vec![
                 "An average of ".into(),
                 Span::styled(imge::humanize(copy_speed), self.ui_accent),
                 " per second.".into(),
             ]));
         } else {
-            let verify_speed = progress.done.checked_div(progress.verify_secs).unwrap_or(0);
+            let verify_speed = speed(progress.verify_secs);
             lines.push(Line::from(vec![
                 "An average of ".into(),
                 Span::styled(imge::humanize(copy_speed), self.ui_accent),

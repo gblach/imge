@@ -50,8 +50,8 @@ pub struct Volume {
 pub struct Progress {
     pub size: u64,
     pub done: u64,
-    pub copy_secs: u64,
-    pub verify_secs: u64,
+    pub copy_secs: f64,
+    pub verify_secs: f64,
     pub finished: bool,
 }
 
@@ -216,7 +216,7 @@ pub fn copy(
     destfile.finish()?;
 
     let mut progress = progress_mutex.lock().unwrap();
-    progress.copy_secs = timer.elapsed().as_secs();
+    progress.copy_secs = timer.elapsed().as_secs_f64();
     progress.finished = true;
 
     Ok(())
@@ -305,7 +305,7 @@ pub fn verify(
     }
 
     let mut progress = progress_mutex.lock().unwrap();
-    progress.verify_secs = timer.elapsed().as_secs();
+    progress.verify_secs = timer.elapsed().as_secs_f64();
     progress.finished = true;
 
     Ok(())
