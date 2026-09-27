@@ -557,11 +557,17 @@ impl Mainloop {
                 _ => {}
             }
         } else if key.code == KeyCode::Esc {
+            let aborted_write = self.modal == Modal::Copying && !self.args.from_drive;
             self.cancel.store(true, Ordering::Relaxed);
             self.exit = self.args.drive.is_some();
             self.modal = Modal::None;
             self.progress = None;
-            *self.error.lock().unwrap() = None;
+            *self.error.lock().unwrap() = aborted_write.then(|| {
+                anyhow!(
+                    "Copying cancelled, {} is left partially written.",
+                    self.selected_drive.as_ref().unwrap().to_string_lossy()
+                )
+            });
         }
 
         Ok(())
