@@ -334,7 +334,9 @@ impl Mainloop {
             true => (&drive_path, &self.image_basename),
         };
 
-        let mut lines = Vec::with_capacity(6);
+        let is_mounted = !self.args.from_drive && self.drives[self.selected_row].is_mounted;
+
+        let mut lines = Vec::with_capacity(7);
         lines.push(Line::from(""));
 
         if self.args.from_drive {
@@ -351,6 +353,13 @@ impl Mainloop {
 
         if !self.args.from_drive {
             lines.push(Line::from("This is something that cannot be undone."));
+        }
+
+        if is_mounted {
+            lines.push(Line::from(Span::styled(
+                "This drive is mounted, consider unmounting it first.",
+                Style::new().red().bold(),
+            )));
         }
 
         lines.push(Line::from(""));
