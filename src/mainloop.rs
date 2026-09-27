@@ -335,11 +335,12 @@ impl Mainloop {
         };
 
         let is_mounted = !self.args.from_drive && self.drives[self.selected_row].is_mounted;
+        let image_exists = self.args.from_drive && Path::new(&self.args.image).exists();
 
         let mut lines = Vec::with_capacity(7);
         lines.push(Line::from(""));
 
-        if self.args.from_drive {
+        if self.args.from_drive && !image_exists {
             lines.push(Line::from(""));
         }
 
@@ -353,6 +354,12 @@ impl Mainloop {
 
         if !self.args.from_drive {
             lines.push(Line::from("This is something that cannot be undone."));
+        }
+
+        if image_exists {
+            lines.push(Line::from(
+                "The image file already exists and will be overwritten.",
+            ));
         }
 
         if is_mounted {
