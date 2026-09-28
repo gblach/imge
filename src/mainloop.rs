@@ -592,10 +592,6 @@ impl Mainloop {
                 }
             }
 
-            if !self.drives.is_empty() && self.selected_row > self.drives.len() - 1 {
-                self.selected_row = self.drives.len() - 1;
-            }
-
             if self.drives.is_empty() {
                 self.selected_drive = None;
                 self.selected_size = 0;
