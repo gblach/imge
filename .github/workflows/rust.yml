@@ -30,9 +30,6 @@ jobs:
         with:
           key: ${{ matrix.toolchain }}
 
-      - name: Install libarchive
-        run: sudo apt-get -y install libarchive-dev
-
       - name: Check
         run: cargo check --verbose
 
