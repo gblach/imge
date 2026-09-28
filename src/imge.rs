@@ -183,7 +183,7 @@ pub fn copy(
 
     let mut srcfile = open_for_reading(src)?;
     let mut destfile = open_for_writing(dest)?;
-    let mut buffer = [0u8; BLOCK_SIZE];
+    let mut buffer = vec![0u8; BLOCK_SIZE];
     let size = src.size.unwrap_or_default();
     let mut done = 0;
     let timer = Instant::now();
@@ -278,7 +278,7 @@ pub fn verify(
         .custom_flags(libc::O_DIRECT)
         .open(&drive.path)?;
 
-    let mut image_buffer = [0u8; BLOCK_SIZE];
+    let mut image_buffer = vec![0u8; BLOCK_SIZE];
     let mut drive_buf = AlignedBuf::new(BLOCK_SIZE, 4096)?;
 
     let timer = Instant::now();
