@@ -603,8 +603,7 @@ impl Mainloop {
             }
         }
 
-        self.selected_drive
-            .clone_from(&Some(self.drives[self.selected_row].name.clone()));
+        self.selected_drive = Some(self.drives[self.selected_row].name.clone());
         self.selected_size = self.drives[self.selected_row].size;
 
         Ok(())
