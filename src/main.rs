@@ -33,8 +33,12 @@ struct Args {
     #[argp(switch, short = 'v')]
     verify: bool,
 
+    /// show version and exit
+    #[argp(switch)]
+    version: bool,
+
     /// path to image
-    #[argp(positional)]
+    #[argp(positional, default = "OsString::new()")]
     image: OsString,
 }
 
@@ -52,6 +56,16 @@ fn terminal_raw_mode(raw_mode: bool) -> Result<()> {
 
 fn main() -> Result<()> {
     let args: Args = argp::parse_args_or_exit(argp::DEFAULT);
+
+    if args.version {
+        println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
+    // The image has a default only so --version works without one.
+    if args.image.is_empty() {
+        bail!("missing path to image, see --help");
+    }
 
     let path = Path::new(&args.image);
     let filename = path
