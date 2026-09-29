@@ -1,6 +1,6 @@
 [package]
 name = "imge"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 description = "Write disk images to physical drive or vice versa."
 readme = "README.md"
@@ -21,7 +21,7 @@ num-format = { version = "0.4", features = ["with-system-locale"] }
 ratatui = "0.30"
 scopeguard = "1"
 xz2 = "0.1"
-zstd = "0.13"
+zstd = "0.14"
 
 [profile.release]
 strip = "symbols"
