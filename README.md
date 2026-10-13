@@ -18,13 +18,14 @@ $ export PATH=$PATH:~/.cargo/bin
 ## Synopsis
 
 ```
-imge <image> [-a] [-d <drive>] [-f] [-v]
+imge <image> [-a] [-b <bmap>] [-d <drive>] [-f] [-v]
 
 Positional Arguments:
   image             path to image
 
 Options:
   -a, --all-drives  show all drives
+  -b, --bmap        use this bmap file
   -d, --drive       use this drive, do not ask
   -f, --from-drive  copy drive to image (instead of image to drive)
   -v, --verify      verify if data was copied correctly
@@ -38,6 +39,10 @@ Options:
 When copying from image to disk and the image is compressed, the image is decompressed on the fly.
 When copying from disk to image and the image ends in .gz, .bz2, .xz or .zst,
 the image is compressed on the fly.
+When copying from image to disk and a block map file created by `bmaptool` is found
+(given by `-b` or named like the image without the compression extension plus .bmap,
+e.g. foo.img.bmap for foo.img.xz), only the mapped blocks are written and their checksums
+are checked, which is usually much faster.
 Accessing a drive usually requires root privileges, so run `imge` with `sudo`.
 It's intended to be an easier to use and less error-prone than `dd`,
 since choosing the wrong disk may have a big impact on the data on your hard drive.

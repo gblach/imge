@@ -21,6 +21,10 @@ struct Args {
     #[argp(switch, short = 'a')]
     all_drives: bool,
 
+    /// use this bmap file (default: <image without compression extension>.bmap)
+    #[argp(option, short = 'b')]
+    bmap: Option<OsString>,
+
     /// use this drive, do not ask
     #[argp(option, short = 'd')]
     drive: Option<OsString>,
@@ -75,6 +79,10 @@ fn main() -> Result<()> {
 
     if fs::metadata(path).is_ok_and(|m| m.is_dir()) {
         bail!("{} is a directory", path.display());
+    }
+
+    if args.from_drive && args.bmap.is_some() {
+        bail!("--bmap cannot be used with --from-drive");
     }
 
     if args.from_drive {

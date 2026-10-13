@@ -11,7 +11,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::*;
 use std::ffi::OsString;
 use std::os::unix::fs::FileTypeExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -34,6 +34,7 @@ pub struct Mainloop {
     ui_accent: Style,
     image_basename: String,
     image_compression: imge::Compression,
+    bmap: Option<imge::Bmap>,
     locale: SystemLocale,
     drives: Vec<imge::Drive>,
     selected_row: usize,
@@ -73,11 +74,33 @@ impl Mainloop {
             _ => imge::Compression::None,
         };
 
+        let bmap_path = match &args.bmap {
+            Some(path) => Some(PathBuf::from(path)),
+            None if !args.from_drive => {
+                let uncompressed = match image_compression {
+                    imge::Compression::None => image_path.to_path_buf(),
+                    _ => image_path.with_extension(""),
+                };
+                let mut path = uncompressed.into_os_string();
+                path.push(".bmap");
+                Some(PathBuf::from(path)).filter(|p| p.exists())
+            }
+            None => None,
+        };
+        let bmap = match bmap_path {
+            Some(path) => Some(
+                imge::Bmap::parse(&path)
+                    .with_context(|| format!("failed to read bmap {}", path.display()))?,
+            ),
+            None => None,
+        };
+
         Ok(Self {
             args: args.clone(),
             ui_accent,
             image_basename,
             image_compression,
+            bmap,
             locale: SystemLocale::default()?,
             drives: vec![],
             selected_row: 0,
@@ -609,7 +632,9 @@ impl Mainloop {
         let image = imge::Volume {
             vtype: imge::VolumeType::Image,
             path: self.args.image.clone(),
-            size: if self.image_compression == imge::Compression::None {
+            size: if let Some(bmap) = &self.bmap {
+                Some(bmap.image_size)
+            } else if self.image_compression == imge::Compression::None {
                 match fs::metadata(&self.args.image) {
                     Ok(metadata) => {
                         if metadata.file_type().is_char_device() {
@@ -624,6 +649,7 @@ impl Mainloop {
                 None
             },
             compression: self.image_compression,
+            bmap: self.bmap.clone(),
         };
 
         let drive = imge::Volume {
@@ -631,6 +657,7 @@ impl Mainloop {
             path: self.selected_drive.clone().unwrap(),
             size: Some(self.selected_size),
             compression: imge::Compression::None,
+            bmap: None,
         };
 
         (image, drive)
@@ -647,8 +674,12 @@ impl Mainloop {
             true => (drive, image),
         };
 
+        let size = match &src.bmap {
+            Some(bmap) => bmap.mapped_size(),
+            None => src.size.unwrap_or_default(),
+        };
         let progress = Arc::new(Mutex::new(imge::Progress {
-            size: src.size.unwrap_or_default(),
+            size,
             ..Default::default()
         }));
 
