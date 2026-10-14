@@ -416,7 +416,7 @@ impl Mainloop {
         )
         .intersection(frame.area());
 
-        if progress.size > 0 {
+        if progress.size > 0 || progress.compressed_size > 0 {
             let block = Block::default()
                 .title_top(" Copying ")
                 .title_style(Style::new().add_modifier(Modifier::BOLD))
@@ -678,8 +678,14 @@ impl Mainloop {
             Some(bmap) => bmap.mapped_size(),
             None => src.size.unwrap_or_default(),
         };
+        let compressed_size = if src.size.is_none() && src.compression != imge::Compression::None {
+            fs::metadata(&src.path).map(|m| m.len()).unwrap_or_default()
+        } else {
+            0
+        };
         let progress = Arc::new(Mutex::new(imge::Progress {
             size,
+            compressed_size,
             ..Default::default()
         }));
 

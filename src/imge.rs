@@ -10,7 +10,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -168,6 +168,10 @@ pub struct Volume {
 pub struct Progress {
     pub size: u64,
     pub done: u64,
+    // The decompressed size of a compressed image is unknown, so its progress is estimated
+    // from how much of the compressed file has been read.
+    pub compressed_size: u64,
+    pub compressed_done: u64,
     pub copy_secs: f64,
     pub verify_secs: f64,
     pub finished: bool,
@@ -175,10 +179,12 @@ pub struct Progress {
 
 impl Progress {
     pub fn percents(&self) -> f64 {
-        if self.size == 0 {
-            0.0
-        } else {
+        if self.size > 0 {
             (self.done as f64 / self.size as f64).min(1.0)
+        } else if self.compressed_size > 0 {
+            (self.compressed_done as f64 / self.compressed_size as f64).min(1.0)
+        } else {
+            0.0
         }
     }
 }
@@ -214,10 +220,21 @@ pub fn list_drives(all_drives: bool) -> Result<Vec<Drive>> {
     Ok(drives)
 }
 
-fn open_for_reading(vol: &Volume) -> Result<Box<dyn Read>> {
-    let file = File::open(&vol.path)?;
+struct CountingReader<R> {
+    inner: R,
+    count: Arc<AtomicU64>,
+}
 
-    let file: Box<dyn Read> = match vol.compression {
+impl<R: Read> Read for CountingReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let len = self.inner.read(buf)?;
+        self.count.fetch_add(len as u64, Ordering::Relaxed);
+        Ok(len)
+    }
+}
+
+fn decompress(file: impl Read + 'static, compression: Compression) -> Result<Box<dyn Read>> {
+    let file: Box<dyn Read> = match compression {
         Compression::None => Box::new(file),
         Compression::Gzip => Box::new(flate2::read::GzDecoder::new(file)),
         Compression::Bzip2 => Box::new(bzip2::read::BzDecoder::new(file)),
@@ -226,6 +243,10 @@ fn open_for_reading(vol: &Volume) -> Result<Box<dyn Read>> {
     };
 
     Ok(file)
+}
+
+fn open_for_reading(vol: &Volume) -> Result<Box<dyn Read>> {
+    decompress(File::open(&vol.path)?, vol.compression)
 }
 
 // Encoders write their trailer on drop and ignore errors there, so they must be finished
@@ -376,7 +397,12 @@ pub fn copy(
         return copy_mapped(src, dest, bmap, progress_mutex, cancelled);
     }
 
-    let mut srcfile = open_for_reading(src)?;
+    let compressed_done = Arc::new(AtomicU64::new(0));
+    let counting_file = CountingReader {
+        inner: File::open(&src.path)?,
+        count: compressed_done.clone(),
+    };
+    let mut srcfile = decompress(counting_file, src.compression)?;
     let mut destfile = open_for_writing(dest)?;
     let mut buffer = vec![0u8; BLOCK_SIZE];
     let size = src.size.unwrap_or_default();
@@ -405,7 +431,9 @@ pub fn copy(
 
         destfile.write_all(&buffer[..len])?;
         done += len as u64;
-        progress_mutex.lock().unwrap().done = done;
+        let mut progress = progress_mutex.lock().unwrap();
+        progress.done = done;
+        progress.compressed_done = compressed_done.load(Ordering::Relaxed);
     }
 
     destfile.finish()?;
