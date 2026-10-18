@@ -4,17 +4,18 @@
 
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::digest::DynDigest;
-use std::alloc::{Layout, alloc, dealloc};
+use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-const BLOCK_SIZE: usize = 1024 * 1024;
+const BLOCK_SIZE: usize = 4 * 1024 * 1024;
 
 pub struct Drive {
     pub name: OsString,
@@ -249,6 +250,50 @@ fn open_for_reading(vol: &Volume) -> Result<Box<dyn Read>> {
     decompress(File::open(&vol.path)?, vol.compression)
 }
 
+struct AlignedBuf {
+    ptr: *mut u8,
+    layout: Layout,
+}
+
+impl AlignedBuf {
+    fn new(size: usize, align: usize) -> Result<Self> {
+        let layout = Layout::from_size_align(size, align)?;
+        let ptr = unsafe { alloc_zeroed(layout) };
+        if ptr.is_null() {
+            return Err(anyhow!("failed to allocate aligned buffer"));
+        }
+        Ok(Self { ptr, layout })
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.layout.size()) }
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.layout.size()) }
+    }
+}
+
+impl Drop for AlignedBuf {
+    fn drop(&mut self) {
+        unsafe { dealloc(self.ptr, self.layout) };
+    }
+}
+
+// Like read_exact, but a short count at EOF is returned instead of being an error.
+fn read_full(file: &mut dyn Read, buf: &mut [u8]) -> io::Result<usize> {
+    let mut total = 0;
+    while total < buf.len() {
+        match file.read(&mut buf[total..]) {
+            Ok(0) => break,
+            Ok(n) => total += n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(total)
+}
+
 // Encoders write their trailer on drop and ignore errors there, so they must be finished
 // explicitly before the output is reported as complete.
 trait FinishWrite: Write {
@@ -278,15 +323,58 @@ impl_finish_write!(
     zstd::stream::write::Encoder<'static, File>
 );
 
+// O_DIRECT rejects writes whose buffer, length or offset are not block aligned. Only the tail
+// of an image can be like that, so O_DIRECT is turned off for it instead of padding the write.
+fn disable_direct_if_unaligned(file: &File, buf: &[u8], offset: u64) -> io::Result<()> {
+    if (buf.as_ptr() as usize | buf.len()).is_multiple_of(4096) && offset.is_multiple_of(4096) {
+        return Ok(());
+    }
+
+    let fd = file.as_raw_fd();
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_DIRECT) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+struct DirectFile {
+    file: File,
+    pos: u64,
+}
+
+impl Write for DirectFile {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        disable_direct_if_unaligned(&self.file, buf, self.pos)?;
+        let len = self.file.write(buf)?;
+        self.pos += len as u64;
+        Ok(len)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+}
+
+// O_DIRECT skips the page cache, but the data can still sit in the drive's own write cache.
+impl FinishWrite for DirectFile {
+    fn finish(self: Box<Self>) -> io::Result<()> {
+        self.file.sync_all()
+    }
+}
+
 fn open_for_writing(vol: &Volume) -> Result<Box<dyn FinishWrite>> {
     let mut options = OpenOptions::new();
     let mut options = options.create(true).write(true).truncate(true);
     if vol.vtype == VolumeType::Drive {
-        options = options.custom_flags(libc::O_DSYNC)
+        options = options.custom_flags(libc::O_DIRECT)
     }
     let file = options.open(&vol.path)?;
 
     let file: Box<dyn FinishWrite> = match vol.compression {
+        Compression::None if vol.vtype == VolumeType::Drive => {
+            Box::new(DirectFile { file, pos: 0 })
+        }
         Compression::None => Box::new(file),
         Compression::Gzip => Box::new(flate2::write::GzEncoder::new(
             file,
@@ -331,9 +419,9 @@ fn copy_mapped(
     let mut srcfile = open_for_reading(src)?;
     let destfile = OpenOptions::new()
         .write(true)
-        .custom_flags(libc::O_DSYNC)
+        .custom_flags(libc::O_DIRECT)
         .open(&dest.path)?;
-    let mut buffer = vec![0u8; BLOCK_SIZE];
+    let mut buffer = AlignedBuf::new(BLOCK_SIZE, 4096)?;
     let mut hasher = bmap.checksum_type.hasher();
     let mut pos = 0;
     let mut done = 0;
@@ -341,7 +429,7 @@ fn copy_mapped(
 
     for range in &bmap.ranges {
         let (start, end) = bmap.byte_range(range);
-        discard(&mut srcfile, start - pos, &mut buffer, cancelled)?;
+        discard(&mut srcfile, start - pos, buffer.as_mut_slice(), cancelled)?;
         pos = start;
 
         while pos < end {
@@ -350,9 +438,11 @@ fn copy_mapped(
             }
 
             let len = (end - pos).min(BLOCK_SIZE as u64) as usize;
-            srcfile.read_exact(&mut buffer[..len])?;
-            hasher.update(&buffer[..len]);
-            destfile.write_all_at(&buffer[..len], pos)?;
+            let data = &mut buffer.as_mut_slice()[..len];
+            srcfile.read_exact(data)?;
+            hasher.update(data);
+            disable_direct_if_unaligned(&destfile, data, pos)?;
+            destfile.write_all_at(data, pos)?;
             pos += len as u64;
             done += len as u64;
             progress_mutex.lock().unwrap().done = done;
@@ -371,6 +461,8 @@ fn copy_mapped(
             );
         }
     }
+
+    destfile.sync_all()?;
 
     let mut progress = progress_mutex.lock().unwrap();
     progress.copy_secs = timer.elapsed().as_secs_f64();
@@ -404,7 +496,7 @@ pub fn copy(
     };
     let mut srcfile = decompress(counting_file, src.compression)?;
     let mut destfile = open_for_writing(dest)?;
-    let mut buffer = vec![0u8; BLOCK_SIZE];
+    let mut buffer = AlignedBuf::new(BLOCK_SIZE, 4096)?;
     let size = src.size.unwrap_or_default();
     let mut done = 0;
     let timer = Instant::now();
@@ -424,12 +516,13 @@ pub fn copy(
             break;
         }
 
-        let len = srcfile.read(&mut buffer[..want])?;
+        // Short reads from a decompressor would leave unaligned writes, so fill whole blocks.
+        let len = read_full(&mut srcfile, &mut buffer.as_mut_slice()[..want])?;
         if len == 0 {
             break;
         }
 
-        destfile.write_all(&buffer[..len])?;
+        destfile.write_all(&buffer.as_slice()[..len])?;
         done += len as u64;
         let mut progress = progress_mutex.lock().unwrap();
         progress.done = done;
@@ -443,50 +536,6 @@ pub fn copy(
     progress.finished = true;
 
     Ok(())
-}
-
-struct AlignedBuf {
-    ptr: *mut u8,
-    layout: Layout,
-}
-
-impl AlignedBuf {
-    fn new(size: usize, align: usize) -> Result<Self> {
-        let layout = Layout::from_size_align(size, align)?;
-        let ptr = unsafe { alloc(layout) };
-        if ptr.is_null() {
-            return Err(anyhow!("failed to allocate aligned buffer"));
-        }
-        Ok(Self { ptr, layout })
-    }
-
-    fn as_slice(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.ptr, self.layout.size()) }
-    }
-
-    fn as_mut_slice(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.layout.size()) }
-    }
-}
-
-impl Drop for AlignedBuf {
-    fn drop(&mut self) {
-        unsafe { dealloc(self.ptr, self.layout) };
-    }
-}
-
-// Like read_exact, but a short count at EOF is returned instead of being an error.
-fn read_full(file: &mut dyn Read, buf: &mut [u8]) -> io::Result<usize> {
-    let mut total = 0;
-    while total < buf.len() {
-        match file.read(&mut buf[total..]) {
-            Ok(0) => break,
-            Ok(n) => total += n,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(total)
 }
 
 fn read_full_at(file: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
