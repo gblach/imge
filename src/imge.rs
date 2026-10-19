@@ -12,10 +12,14 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Instant;
 
 const BLOCK_SIZE: usize = 4 * 1024 * 1024;
+// Lets the reader run a few blocks ahead of the drive without using much memory.
+const PIPELINE_BUFFERS: usize = 4;
 
 pub struct Drive {
     pub name: OsString,
@@ -246,10 +250,6 @@ fn decompress(file: impl Read + 'static, compression: Compression) -> Result<Box
     Ok(file)
 }
 
-fn open_for_reading(vol: &Volume) -> Result<Box<dyn Read>> {
-    decompress(File::open(&vol.path)?, vol.compression)
-}
-
 struct AlignedBuf {
     ptr: *mut u8,
     layout: Layout,
@@ -279,6 +279,9 @@ impl Drop for AlignedBuf {
         unsafe { dealloc(self.ptr, self.layout) };
     }
 }
+
+// The buffer owns its allocation exclusively, like a Box<[u8]> does.
+unsafe impl Send for AlignedBuf {}
 
 // Like read_exact, but a short count at EOF is returned instead of being an error.
 fn read_full(file: &mut dyn Read, buf: &mut [u8]) -> io::Result<usize> {
@@ -409,43 +412,120 @@ fn discard(
     Ok(())
 }
 
-fn copy_mapped(
-    src: &Volume,
-    dest: &Volume,
+struct Chunk {
+    buf: AlignedBuf,
+    len: usize,
+    pos: u64,
+}
+
+struct Producer {
+    free: Receiver<AlignedBuf>,
+    full: Sender<Chunk>,
+}
+
+impl Producer {
+    // None and false mean the consumer has stopped, so the producer should stop too.
+    fn buffer(&self) -> Option<AlignedBuf> {
+        self.free.recv().ok()
+    }
+
+    fn send(&self, buf: AlignedBuf, len: usize, pos: u64) -> bool {
+        self.full.send(Chunk { buf, len, pos }).is_ok()
+    }
+}
+
+// Runs produce on its own thread, so reading and decompressing the source overlaps with the
+// drive I/O done by consume. Buffers are passed back and forth, which bounds memory use.
+fn pipeline(
+    cancelled: &Arc<AtomicBool>,
+    produce: impl FnOnce(&Producer) -> Result<()> + Send,
+    mut consume: impl FnMut(&[u8], u64) -> Result<()>,
+) -> Result<()> {
+    let (free_tx, free_rx) = mpsc::channel();
+    let (full_tx, full_rx) = mpsc::channel();
+    for _ in 0..PIPELINE_BUFFERS {
+        free_tx.send(AlignedBuf::new(BLOCK_SIZE, 4096)?).unwrap();
+    }
+
+    thread::scope(|s| {
+        let reader = s.spawn(move || {
+            produce(&Producer {
+                free: free_rx,
+                full: full_tx,
+            })
+        });
+
+        let mut result = Ok(());
+        for chunk in full_rx {
+            if cancelled.load(Ordering::Relaxed) {
+                break;
+            }
+            result = consume(&chunk.buf.as_slice()[..chunk.len], chunk.pos);
+            if result.is_err() {
+                break;
+            }
+            let _ = free_tx.send(chunk.buf);
+        }
+
+        // Unblocks a reader waiting for a free buffer after the loop stopped early.
+        drop(free_tx);
+        let produced = reader.join().unwrap();
+        result.and(produced)
+    })
+}
+
+fn produce_stream(src: &mut dyn Read, size: u64, p: &Producer) -> Result<()> {
+    let mut pos = 0;
+
+    // A char-device source never reaches EOF, so stop exactly at the known size.
+    while size == 0 || pos < size {
+        let Some(mut buf) = p.buffer() else {
+            break;
+        };
+        let want = if size > 0 {
+            (size - pos).min(BLOCK_SIZE as u64) as usize
+        } else {
+            BLOCK_SIZE
+        };
+
+        // Short reads from a decompressor would leave unaligned writes, so fill whole blocks.
+        let len = read_full(src, &mut buf.as_mut_slice()[..want])?;
+        if len == 0 || !p.send(buf, len, pos) {
+            break;
+        }
+        pos += len as u64;
+    }
+
+    Ok(())
+}
+
+fn produce_mapped(
+    src: &mut dyn Read,
     bmap: &Bmap,
-    progress_mutex: &ProgressMutex,
+    p: &Producer,
     cancelled: &Arc<AtomicBool>,
 ) -> Result<()> {
-    let mut srcfile = open_for_reading(src)?;
-    let destfile = OpenOptions::new()
-        .write(true)
-        .custom_flags(libc::O_DIRECT)
-        .open(&dest.path)?;
-    let mut buffer = AlignedBuf::new(BLOCK_SIZE, 4096)?;
+    let mut skipped = vec![0u8; BLOCK_SIZE];
     let mut hasher = bmap.checksum_type.hasher();
     let mut pos = 0;
-    let mut done = 0;
-    let timer = Instant::now();
 
     for range in &bmap.ranges {
         let (start, end) = bmap.byte_range(range);
-        discard(&mut srcfile, start - pos, buffer.as_mut_slice(), cancelled)?;
+        discard(src, start - pos, &mut skipped, cancelled)?;
         pos = start;
 
         while pos < end {
-            if cancelled.load(Ordering::Relaxed) {
+            let Some(mut buf) = p.buffer() else {
+                return Ok(());
+            };
+            let len = (end - pos).min(BLOCK_SIZE as u64) as usize;
+            let data = &mut buf.as_mut_slice()[..len];
+            src.read_exact(data)?;
+            hasher.update(data);
+            if !p.send(buf, len, pos) {
                 return Ok(());
             }
-
-            let len = (end - pos).min(BLOCK_SIZE as u64) as usize;
-            let data = &mut buffer.as_mut_slice()[..len];
-            srcfile.read_exact(data)?;
-            hasher.update(data);
-            disable_direct_if_unaligned(&destfile, data, pos)?;
-            destfile.write_all_at(data, pos)?;
             pos += len as u64;
-            done += len as u64;
-            progress_mutex.lock().unwrap().done = done;
         }
 
         let checksum: String = hasher
@@ -460,6 +540,47 @@ fn copy_mapped(
                 range.last
             );
         }
+    }
+
+    Ok(())
+}
+
+fn copy_mapped(
+    src: &Volume,
+    dest: &Volume,
+    bmap: &Bmap,
+    progress_mutex: &ProgressMutex,
+    cancelled: &Arc<AtomicBool>,
+) -> Result<()> {
+    let srcfile = File::open(&src.path)?;
+    let destfile = OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_DIRECT)
+        .open(&dest.path)?;
+    let mut done = 0;
+    let timer = Instant::now();
+
+    pipeline(
+        cancelled,
+        |p| {
+            produce_mapped(
+                &mut decompress(srcfile, src.compression)?,
+                bmap,
+                p,
+                cancelled,
+            )
+        },
+        |data, pos| {
+            disable_direct_if_unaligned(&destfile, data, pos)?;
+            destfile.write_all_at(data, pos)?;
+            done += data.len() as u64;
+            progress_mutex.lock().unwrap().done = done;
+            Ok(())
+        },
+    )?;
+
+    if cancelled.load(Ordering::Relaxed) {
+        return Ok(());
     }
 
     destfile.sync_all()?;
@@ -494,39 +615,26 @@ pub fn copy(
         inner: File::open(&src.path)?,
         count: compressed_done.clone(),
     };
-    let mut srcfile = decompress(counting_file, src.compression)?;
     let mut destfile = open_for_writing(dest)?;
-    let mut buffer = AlignedBuf::new(BLOCK_SIZE, 4096)?;
     let size = src.size.unwrap_or_default();
     let mut done = 0;
     let timer = Instant::now();
 
-    loop {
-        if cancelled.load(Ordering::Relaxed) {
-            return Ok(());
-        }
+    pipeline(
+        cancelled,
+        |p| produce_stream(&mut decompress(counting_file, src.compression)?, size, p),
+        |data, _| {
+            destfile.write_all(data)?;
+            done += data.len() as u64;
+            let mut progress = progress_mutex.lock().unwrap();
+            progress.done = done;
+            progress.compressed_done = compressed_done.load(Ordering::Relaxed);
+            Ok(())
+        },
+    )?;
 
-        // A char-device source never reaches EOF, so stop exactly at the known size.
-        let want = if size > 0 {
-            (size - done).min(BLOCK_SIZE as u64) as usize
-        } else {
-            BLOCK_SIZE
-        };
-        if want == 0 {
-            break;
-        }
-
-        // Short reads from a decompressor would leave unaligned writes, so fill whole blocks.
-        let len = read_full(&mut srcfile, &mut buffer.as_mut_slice()[..want])?;
-        if len == 0 {
-            break;
-        }
-
-        destfile.write_all(&buffer.as_slice()[..len])?;
-        done += len as u64;
-        let mut progress = progress_mutex.lock().unwrap();
-        progress.done = done;
-        progress.compressed_done = compressed_done.load(Ordering::Relaxed);
+    if cancelled.load(Ordering::Relaxed) {
+        return Ok(());
     }
 
     destfile.finish()?;
@@ -558,42 +666,44 @@ fn verify_mapped(
     progress_mutex: &ProgressMutex,
     cancelled: &Arc<AtomicBool>,
 ) -> Result<()> {
-    let mut image_file = open_for_reading(image)?;
+    let image_file = File::open(&image.path)?;
     let drive_file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_DIRECT)
         .open(&drive.path)?;
 
-    let mut image_buffer = vec![0u8; BLOCK_SIZE];
     let mut drive_buf = AlignedBuf::new(BLOCK_SIZE, 4096)?;
-    let mut pos = 0;
 
     let timer = Instant::now();
 
-    for range in &bmap.ranges {
-        let (start, end) = bmap.byte_range(range);
-        discard(&mut image_file, start - pos, &mut image_buffer, cancelled)?;
-        pos = start;
-
-        while pos < end {
-            if cancelled.load(Ordering::Relaxed) {
-                return Ok(());
-            }
-
-            let len = (end - pos).min(BLOCK_SIZE as u64) as usize;
-            image_file.read_exact(&mut image_buffer[..len])?;
+    pipeline(
+        cancelled,
+        |p| {
+            produce_mapped(
+                &mut decompress(image_file, image.compression)?,
+                bmap,
+                p,
+                cancelled,
+            )
+        },
+        |data, pos| {
+            let len = data.len();
 
             // O_DIRECT needs the read length aligned too, so read a bit past the range end.
             let drive_slice = &mut drive_buf.as_mut_slice()[..len.next_multiple_of(4096)];
             let drive_len = read_full_at(&drive_file, drive_slice, pos)?;
 
-            if drive_len < len || image_buffer[..len] != drive_buf.as_slice()[..len] {
+            if drive_len < len || data != &drive_buf.as_slice()[..len] {
                 return Err(anyhow!(io::Error::other("Verification failed")));
             }
 
-            pos += len as u64;
             progress_mutex.lock().unwrap().done += len as u64;
-        }
+            Ok(())
+        },
+    )?;
+
+    if cancelled.load(Ordering::Relaxed) {
+        return Ok(());
     }
 
     let mut progress = progress_mutex.lock().unwrap();
@@ -613,36 +723,35 @@ pub fn verify(
         return verify_mapped(image, drive, bmap, progress_mutex, cancelled);
     }
 
-    let mut image_file = open_for_reading(image)?;
+    let image_file = File::open(&image.path)?;
     let mut drive_file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_DIRECT)
         .open(&drive.path)?;
 
-    let mut image_buffer = vec![0u8; BLOCK_SIZE];
     let mut drive_buf = AlignedBuf::new(BLOCK_SIZE, 4096)?;
+    let size = image.size.unwrap_or_default();
 
     let timer = Instant::now();
 
-    loop {
-        if cancelled.load(Ordering::Relaxed) {
-            return Ok(());
-        }
+    pipeline(
+        cancelled,
+        |p| produce_stream(&mut decompress(image_file, image.compression)?, size, p),
+        |data, _| {
+            let len = data.len();
+            let drive_len = read_full(&mut drive_file, drive_buf.as_mut_slice())?;
 
-        let len = read_full(&mut image_file, &mut image_buffer)?;
+            if drive_len < len || data != &drive_buf.as_slice()[..len] {
+                return Err(anyhow!(io::Error::other("Verification failed")));
+            }
 
-        if len == 0 {
-            break;
-        }
+            progress_mutex.lock().unwrap().done += len as u64;
+            Ok(())
+        },
+    )?;
 
-        let drive_len = read_full(&mut drive_file, drive_buf.as_mut_slice())?;
-
-        if drive_len < len || image_buffer[..len] != drive_buf.as_slice()[..len] {
-            return Err(anyhow!(io::Error::other("Verification failed")));
-        }
-
-        let mut progress = progress_mutex.lock().unwrap();
-        progress.done += len as u64;
+    if cancelled.load(Ordering::Relaxed) {
+        return Ok(());
     }
 
     let mut progress = progress_mutex.lock().unwrap();
