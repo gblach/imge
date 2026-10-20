@@ -1,6 +1,6 @@
 [package]
 name = "imge"
-version = "1.0.2"
+version = "1.1.0"
 edition = "2024"
 description = "TUI for copying disk images to/from drives - a less error-prone alternative to dd."
 readme = "README.md"
