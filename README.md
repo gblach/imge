@@ -1,6 +1,7 @@
 # imge
 
-Write disk images to physical drive or vice versa with on-the-fly compression/decompression.
+TUI tool for copying disk images to and from drives with on-the-fly compression/decompression -
+a less error-prone (and simpler) alternative to `dd`.
 
 ## Install
 
