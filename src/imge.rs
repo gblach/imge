@@ -245,7 +245,7 @@ fn decompress(file: impl Read + 'static, compression: Compression) -> Result<Box
         Compression::None => Box::new(file),
         Compression::Gzip => Box::new(flate2::read::GzDecoder::new(file)),
         Compression::Bzip2 => Box::new(bzip2::read::BzDecoder::new(file)),
-        Compression::Xz => Box::new(xz2::read::XzDecoder::new(file)),
+        Compression::Xz => Box::new(liblzma::read::XzDecoder::new(file)),
         Compression::Zstd => Box::new(zstd::stream::read::Decoder::new(file)?),
     };
 
@@ -324,7 +324,7 @@ macro_rules! impl_finish_write {
 impl_finish_write!(
     flate2::write::GzEncoder<File>,
     bzip2::write::BzEncoder<File>,
-    xz2::write::XzEncoder<File>,
+    liblzma::write::XzEncoder<File>,
     zstd::stream::write::Encoder<'static, File>
 );
 
@@ -386,7 +386,7 @@ fn open_for_writing(vol: &Volume) -> Result<Box<dyn FinishWrite>> {
             file,
             bzip2::Compression::default(),
         )),
-        Compression::Xz => Box::new(xz2::write::XzEncoder::new(file, 3)),
+        Compression::Xz => Box::new(liblzma::write::XzEncoder::new(file, 3)),
         Compression::Zstd => Box::new(zstd::stream::write::Encoder::new(
             file,
             zstd::DEFAULT_COMPRESSION_LEVEL,

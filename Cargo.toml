@@ -16,6 +16,7 @@ bzip2 = "0.6"
 crossterm = "0.29"
 drives = "0.6"
 flate2 = "1"
+liblzma = { version = "0.4", features = ["static"] }
 num-format = { version = "0.4", features = ["with-system-locale"] }
 ratatui = "0.30"
 roxmltree = "0.21"
@@ -23,7 +24,6 @@ rustix = { version = "1", features = ["fs"] }
 scopeguard = "1"
 sha1 = "0.11"
 sha2 = "0.11"
-xz2 = "0.1"
 zstd = "0.14"
 
 [profile.release]
