@@ -3,12 +3,13 @@
 //  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use anyhow::{Context, Result, anyhow, bail};
+use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
+use rustix::io::Errno;
 use sha2::digest::DynDigest;
 use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -20,6 +21,7 @@ use std::time::Instant;
 const BLOCK_SIZE: usize = 4 * 1024 * 1024;
 // Lets the reader run a few blocks ahead of the drive without using much memory.
 const PIPELINE_BUFFERS: usize = 4;
+const O_DIRECT: i32 = OFlags::DIRECT.bits() as i32;
 
 pub struct Drive {
     pub name: OsString,
@@ -333,11 +335,8 @@ fn disable_direct_if_unaligned(file: &File, buf: &[u8], offset: u64) -> io::Resu
         return Ok(());
     }
 
-    let fd = file.as_raw_fd();
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_DIRECT) } < 0 {
-        return Err(io::Error::last_os_error());
-    }
+    let flags = fcntl_getfl(file)?;
+    fcntl_setfl(file, flags - OFlags::DIRECT)?;
     Ok(())
 }
 
@@ -370,7 +369,7 @@ fn open_for_writing(vol: &Volume) -> Result<Box<dyn FinishWrite>> {
     let mut options = OpenOptions::new();
     let mut options = options.create(true).write(true).truncate(true);
     if vol.vtype == VolumeType::Drive {
-        options = options.custom_flags(libc::O_DIRECT)
+        options = options.custom_flags(O_DIRECT)
     }
     let file = options.open(&vol.path)?;
 
@@ -555,7 +554,7 @@ fn copy_mapped(
     let srcfile = File::open(&src.path)?;
     let destfile = OpenOptions::new()
         .write(true)
-        .custom_flags(libc::O_DIRECT)
+        .custom_flags(O_DIRECT)
         .open(&dest.path)?;
     let mut done = 0;
     let timer = Instant::now();
@@ -603,7 +602,7 @@ pub fn copy(
         && dest.size.is_some()
         && src.size > dest.size
     {
-        return Err(anyhow!(io::Error::from_raw_os_error(libc::EFBIG)));
+        return Err(anyhow!(io::Error::from(Errno::FBIG)));
     }
 
     if let Some(bmap) = &src.bmap {
@@ -669,7 +668,7 @@ fn verify_mapped(
     let image_file = File::open(&image.path)?;
     let drive_file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_DIRECT)
+        .custom_flags(O_DIRECT)
         .open(&drive.path)?;
 
     let mut drive_buf = AlignedBuf::new(BLOCK_SIZE, 4096)?;
@@ -726,7 +725,7 @@ pub fn verify(
     let image_file = File::open(&image.path)?;
     let mut drive_file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_DIRECT)
+        .custom_flags(O_DIRECT)
         .open(&drive.path)?;
 
     let mut drive_buf = AlignedBuf::new(BLOCK_SIZE, 4096)?;
