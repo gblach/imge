@@ -1,0 +1,2 @@
+[alias]
+dist = "run --quiet --package xtask -- dist"

@@ -26,6 +26,9 @@ sha1 = "0.11"
 sha2 = "0.11"
 zstd = "0.14"
 
+[workspace]
+members = ["xtask"]
+
 [profile.release]
-strip = "symbols"
 lto = "thin"
+strip = "symbols"
