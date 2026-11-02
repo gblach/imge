@@ -5,15 +5,15 @@ a less error-prone (and simpler) alternative to `dd`.
 
 ## Install
 
-```
-# Install from source
-$ cargo install imge
+```sh
+# From source
+cargo install imge
 
-# Install from binary
-$ cargo binstall imge
+# Prebuilt binary
+cargo binstall imge
 
-# If ~/.cargo/bin is not in your PATH
-$ export PATH=$PATH:~/.cargo/bin
+# From a clone of this repository
+cargo install --path .
 ```
 
 ## Synopsis
