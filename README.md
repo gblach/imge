@@ -5,6 +5,16 @@ a less error-prone (and simpler) alternative to `dd`.
 
 ## Install
 
+On Fedora, install it from the
+[gblachx/apps](https://copr.fedorainfracloud.org/coprs/gblachx/apps/) COPR repository:
+
+```sh
+sudo dnf copr enable gblachx/apps
+sudo dnf install imge
+```
+
+With Cargo:
+
 ```sh
 # From source
 cargo install imge
